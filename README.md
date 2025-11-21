@@ -32,10 +32,10 @@ Real-time flood prediction using LSTM + YOLOv8 untuk Jakarta
 ```
 
 ## 👥 Team
-1. **Ari Azis** (EE) - Strategy & API
-2. **SBM Student** - Pitch & Stakeholder
-3. **STI Student** - Frontend/Dashboard
-4. **Informatika Student** - ML/CV
+1. **Mohammad Ari Alexander Aziz** - 13222093
+2. **Naufarrel Zhafif Abhista** - 13523149
+3. **Putri Dzakiyah Suharyono** - 19222034
+4. **Tiffany Viriya Chu** - 18224068
 
 ## 📅 Timeline
 - **Hari 1-2:** Data prep + LSTM training
