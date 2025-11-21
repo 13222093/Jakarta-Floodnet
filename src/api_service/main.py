@@ -1,13 +1,34 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, UploadFile, File
 from pydantic import BaseModel
 from datetime import datetime
 from typing import List, Optional
+import numpy as np
+import cv2
+from ultralytics import YOLO
+import os
 
 app = FastAPI(
     title="Jakarta FloodNet API",
     description="Real-time flood early warning system",
     version="0.1.0"
 )
+
+# ===== GLOBAL MODEL LOADING =====
+# Load model at startup to avoid latency per request
+model = None
+MODEL_PATH_BEST = "models/best.pt"
+MODEL_PATH_FALLBACK = "yolov8n.pt" # Standard model
+
+try:
+    if os.path.exists(MODEL_PATH_BEST):
+        print(f"🚀 Loading custom YOLOv8 model: {MODEL_PATH_BEST}")
+        model = YOLO(MODEL_PATH_BEST)
+    else:
+        print(f"⚠️ Custom model not found. Loading fallback: {MODEL_PATH_FALLBACK}")
+        model = YOLO(MODEL_PATH_FALLBACK)
+    print("✅ YOLOv8 Model loaded successfully!")
+except Exception as e:
+    print(f"❌ Error loading YOLOv8 model: {e}")
 
 # ===== PYDANTIC MODELS (Data Validation) =====
 
@@ -53,6 +74,13 @@ class DetectResponse(BaseModel):
     total_flooded_area_m2: float
     detection_count: int
     timestamp: str
+
+class VisualVerifyResponse(BaseModel):
+    """Response dari endpoint /verify-visual"""
+    is_flood_verified: bool
+    confidence: float
+    detected_objects: List[str]
+    object_count: int
 
 # ===== ENDPOINTS =====
 
@@ -129,6 +157,72 @@ async def detect(data: DetectInput):
         "detection_count": len(detections),
         "timestamp": datetime.now().isoformat()
     }
+
+@app.post("/verify-visual", response_model=VisualVerifyResponse)
+async def verify_visual(file: UploadFile = File(...)):
+    """
+    Verify flood visually using YOLOv8
+    ### Input:
+    - `file`: Image file (UploadFile)
+    ### Output:
+    - `is_flood_verified`: Boolean
+    - `confidence`: Confidence score
+    - `detected_objects`: List of detected object classes
+    """
+    if model is None:
+        return {
+            "is_flood_verified": False,
+            "confidence": 0.0,
+            "detected_objects": ["Model not loaded"],
+            "object_count": 0
+        }
+
+    try:
+        # 1. Read image bytes
+        contents = await file.read()
+        nparr = np.frombuffer(contents, np.uint8)
+        img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+
+        # 2. Inference
+        results = model(img)
+        
+        # 3. Process results
+        detected_objects = []
+        max_conf = 0.0
+        
+        # Check for flood-related classes (or just any objects for now)
+        # If using standard YOLOv8n, we might see 'person', 'car', 'bus', etc.
+        # If using custom model, we look for 'flood', 'water', etc.
+        
+        for r in results:
+            for box in r.boxes:
+                cls_id = int(box.cls[0])
+                conf = float(box.conf[0])
+                class_name = model.names[cls_id]
+                
+                detected_objects.append(class_name)
+                if conf > max_conf:
+                    max_conf = conf
+
+        # Logic: If we detect ANY object, we assume verification (mock logic)
+        # In real scenario: if 'flood' in detected_objects
+        is_verified = len(detected_objects) > 0
+        
+        return {
+            "is_flood_verified": is_verified,
+            "confidence": round(max_conf, 3),
+            "detected_objects": list(set(detected_objects)), # Unique classes
+            "object_count": len(detected_objects)
+        }
+
+    except Exception as e:
+        print(f"❌ Error in visual verification: {e}")
+        return {
+            "is_flood_verified": False,
+            "confidence": 0.0,
+            "detected_objects": [f"Error: {str(e)}"],
+            "object_count": 0
+        }
 
 @app.get("/metrics")
 async def metrics():
