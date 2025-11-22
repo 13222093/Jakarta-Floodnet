@@ -6,6 +6,9 @@ import numpy as np
 import cv2
 from ultralytics import YOLO
 import os
+import tensorflow as tf
+from tensorflow.keras.models import load_model
+import joblib
 
 app = FastAPI(
     title="Jakarta FloodNet API",
@@ -14,29 +17,52 @@ app = FastAPI(
 )
 
 # ===== GLOBAL MODEL LOADING =====
-# Load model at startup to avoid latency per request
-model = None
-MODEL_PATH_BEST = "models/best.pt"
-MODEL_PATH_FALLBACK = "yolov8n.pt" # Standard model
+# 1. YOLOv8 (Visual)
+yolo_model = None
+YOLO_PATH_BEST = "models/best.pt"
+YOLO_PATH_FALLBACK = "yolov8n.pt"
 
 try:
-    if os.path.exists(MODEL_PATH_BEST):
-        print(f"🚀 Loading custom YOLOv8 model: {MODEL_PATH_BEST}")
-        model = YOLO(MODEL_PATH_BEST)
+    if os.path.exists(YOLO_PATH_BEST):
+        print(f"🚀 Loading custom YOLOv8 model: {YOLO_PATH_BEST}")
+        yolo_model = YOLO(YOLO_PATH_BEST)
     else:
-        print(f"⚠️ Custom model not found. Loading fallback: {MODEL_PATH_FALLBACK}")
-        model = YOLO(MODEL_PATH_FALLBACK)
+        print(f"⚠️ Custom model not found. Loading fallback: {YOLO_PATH_FALLBACK}")
+        yolo_model = YOLO(YOLO_PATH_FALLBACK)
     print("✅ YOLOv8 Model loaded successfully!")
 except Exception as e:
     print(f"❌ Error loading YOLOv8 model: {e}")
 
+# 2. LSTM (Prediction)
+lstm_model = None
+scaler = None
+LSTM_PATH = "models/lstm_model.h5"
+SCALER_PATH = "models/scaler.pkl"
+
+try:
+    if os.path.exists(LSTM_PATH) and os.path.exists(SCALER_PATH):
+        print(f"🚀 Loading LSTM model: {LSTM_PATH}")
+        lstm_model = load_model(LSTM_PATH)
+        print(f"🚀 Loading Scaler: {SCALER_PATH}")
+        scaler = joblib.load(SCALER_PATH)
+        print("✅ LSTM System loaded successfully!")
+    else:
+        print("⚠️ LSTM model or scaler not found. /predict will use dummy logic.")
+except Exception as e:
+    print(f"❌ Error loading LSTM system: {e}")
+
+
 # ===== PYDANTIC MODELS (Data Validation) =====
 
 class FloodInput(BaseModel):
-    """Input untuk prediksi banjir - SIMPLIFIED VERSION"""
-    rainfall_mm: float  # Curah hujan dalam mm
+    """Input untuk prediksi banjir"""
+    rainfall_mm: float  # Curah hujan dalam mm (Bogor + Jakarta avg?) -> For now we assume this is a feature
     water_level_cm: float  # Ketinggian Muka Air dalam cm
     location_id: str  # ID lokasi (ex: MANGGARAI_01)
+    # Note: Our model was trained on [hujan_bogor, hujan_jakarta, tma_manggarai]
+    # We need to map input to these 3 features.
+    # For MVP: We'll assume 'rainfall_mm' maps to BOTH bogor and jakarta (simplified)
+    
     class Config:
         schema_extra = {
             "example": {
@@ -66,6 +92,7 @@ class PredictResponse(BaseModel):
     confidence: float
     recommendation: str
     timestamp: str
+    predicted_water_level_cm: float # Added this field
 
 class DetectResponse(BaseModel):
     """Response dari endpoint /detect"""
@@ -96,36 +123,71 @@ async def health():
 @app.post("/predict", response_model=PredictResponse)
 async def predict(data: FloodInput):
     """
-    Predict flooding probability (24-hour forecast)
-    ### Input:
-    - `rainfall_mm` (float): Curah hujan dalam mm
-    - `water_level_cm` (float): Ketinggian Muka Air dalam cm
-    - `location_id` (str): ID lokasi monitoring
-    ### Output:
-    - `flooding_probability`: Probabilitas banjir (0-1)
-    - `risk_level`: HIGH / MEDIUM / LOW
-    - `recommendation`: Rekomendasi aksi
+    Predict flooding probability (Next Hour Water Level)
     """
-    # Dummy logic: semakin tinggi water_level + rainfall → higher probability
-    probability = min((data.water_level_cm / 200 + data.rainfall_mm / 100) / 2, 1.0)
+    predicted_tma = 0.0
+    probability = 0.0
+    
+    if lstm_model is not None and scaler is not None:
+        try:
+            # 1. Prepare Input
+            # Model expects: [hujan_bogor, hujan_jakarta, tma_manggarai]
+            # We map input rainfall_mm to both rainfalls for simplicity
+            input_features = np.array([[data.rainfall_mm, data.rainfall_mm, data.water_level_cm]])
+            
+            # 2. Scale
+            input_scaled = scaler.transform(input_features)
+            
+            # 3. Reshape for LSTM (Samples, TimeSteps, Features) -> (1, 1, 3)
+            input_reshaped = input_scaled.reshape((1, 1, 3))
+            
+            # 4. Predict
+            prediction_scaled = lstm_model.predict(input_reshaped, verbose=0)
+            val_scaled = prediction_scaled[0][0]
+            
+            # 5. Inverse Scale
+            # We need to inverse transform using the same scaler (3 features)
+            # We construct a dummy array with the predicted value in the target column (index 2)
+            dummy_scaled = np.zeros((1, 3))
+            dummy_scaled[0, 2] = val_scaled
+            inverse_pred = scaler.inverse_transform(dummy_scaled)
+            predicted_tma = inverse_pred[0][2]
+            
+            # 6. Calculate Risk/Probability
+            # Warning level is 850 cm.
+            # Probability = sigmoid-like function or linear ratio
+            probability = min(predicted_tma / 950.0, 1.0) # 950 as max reference
+            
+        except Exception as e:
+            print(f"❌ Prediction Error: {e}")
+            # Fallback to dummy
+            probability = min((data.water_level_cm / 200 + data.rainfall_mm / 100) / 2, 1.0)
+    else:
+        # Fallback
+        probability = min((data.water_level_cm / 200 + data.rainfall_mm / 100) / 2, 1.0)
+        predicted_tma = data.water_level_cm # No prediction
+
     confidence = 0.88
+    
     # Determine risk level
-    if probability > 0.70:
+    if probability > 0.8: # > ~760cm
         risk_level = "HIGH"
         recommendation = "Initiate evacuation protocol"
-    elif probability > 0.40:
+    elif probability > 0.5: # > ~475cm
         risk_level = "MEDIUM"
         recommendation = "Prepare evacuation readiness"
     else:
         risk_level = "LOW"
         recommendation = "Continue monitoring"
+        
     return {
         "statusCode": 200,
         "flooding_probability": round(probability, 3),
         "risk_level": risk_level,
         "confidence": round(confidence, 3),
         "recommendation": recommendation,
-        "timestamp": datetime.now().isoformat()
+        "timestamp": datetime.now().isoformat(),
+        "predicted_water_level_cm": round(float(predicted_tma), 2)
     }
 
 @app.post("/detect", response_model=DetectResponse)
@@ -169,7 +231,7 @@ async def verify_visual(file: UploadFile = File(...)):
     - `confidence`: Confidence score
     - `detected_objects`: List of detected object classes
     """
-    if model is None:
+    if yolo_model is None:
         return {
             "is_flood_verified": False,
             "confidence": 0.0,
@@ -184,7 +246,7 @@ async def verify_visual(file: UploadFile = File(...)):
         img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
 
         # 2. Inference
-        results = model(img)
+        results = yolo_model(img)
         
         # 3. Process results
         detected_objects = []
@@ -198,7 +260,7 @@ async def verify_visual(file: UploadFile = File(...)):
             for box in r.boxes:
                 cls_id = int(box.cls[0])
                 conf = float(box.conf[0])
-                class_name = model.names[cls_id]
+                class_name = yolo_model.names[cls_id]
                 
                 detected_objects.append(class_name)
                 if conf > max_conf:
