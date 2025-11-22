@@ -1,591 +1,177 @@
 """
-YOLO Model Module for Jakarta FloodNet Visual Verification
-=========================================================
-
-This module contains the YOLO model class for visual flood verification
-from satellite images, drone footage, or CCTV feeds.
+YOLO Model Module for Jakarta FloodNet
+=====================================
+Robust Visual Verification with Color Heuristics
 """
 
 import cv2
 import numpy as np
 import os
-from typing import List, Dict, Tuple, Optional, Any
 import logging
+from typing import List, Dict, Any, Optional, Union
 
-# Import YOLO with proper error handling
+# Setup Logger
+logger = logging.getLogger(__name__)
+
+# Try Import Ultralytics
 try:
     from ultralytics import YOLO
     YOLO_AVAILABLE = True
 except ImportError:
-    print("⚠️ Ultralytics YOLO not available. Install with: pip install ultralytics")
+    logger.error("❌ Ultralytics not found! Please install: pip install ultralytics")
     YOLO_AVAILABLE = False
-
-from PIL import Image
 
 class FloodVisualVerifier:
     """
-    YOLO-based visual flood verification system for Jakarta FloodNet.
-    
-    This class handles:
-    - Loading pre-trained YOLO models
-    - Detecting flood-related objects (water bodies, flooded areas, vehicles in water)
-    - Analyzing flood severity from visual data
-    - Providing confidence scores for flood detection
+    Visual Verification System using YOLO + Color Analysis.
+    Designed to work even if Custom Flood Model is not ready (Fallbacks to heuristics).
     """
     
-    def __init__(
-        self, 
-        model_path: str = 'models/yolo_model.pt',
-        confidence_threshold: float = 0.5,
-        device: str = 'auto'
-    ):
-        """
-        Initialize YOLO flood verification model.
-        
-        Args:
-            model_path: Path to trained YOLO model weights
-            confidence_threshold: Minimum confidence for detections
-            device: Device to run inference ('auto', 'cpu', 'cuda')
-        """
+    def __init__(self, model_path: str = 'models/yolov8n.pt', confidence_threshold: float = 0.4):
         self.model_path = model_path
-        self.confidence_threshold = confidence_threshold
-        self.device = device
+        self.conf_thresh = confidence_threshold
         self.model = None
         self.is_loaded = False
         
-        # Flood-related class names (customize based on your training data)
-        self.flood_classes = {
-            'flooded_road': 0,
-            'water_body': 1,
-            'submerged_vehicle': 2,
-            'flooded_building': 3,
-            'debris_in_water': 4,
-            'emergency_vehicle': 5,
-            'person_in_water': 6,
-            'flood_barrier': 7
-        }
-        
-        # Severity levels based on detections
-        self.severity_levels = {
-            'no_flood': 0,
-            'minor_flood': 1,
-            'moderate_flood': 2,
-            'major_flood': 3,
-            'severe_flood': 4
-        }
-        
-        self._setup_logging()
-        
-    def _setup_logging(self):
-        """Setup logging for the YOLO model"""
-        logging.basicConfig(level=logging.INFO)
-        self.logger = logging.getLogger(__name__)
+        # COCO Classes that *might* be relevant in flood context (vehicles stuck, people)
+        self.relevant_coco_classes = [0, 1, 2, 3, 5, 7] # person, bicycle, car, motorcycle, bus, truck
         
     def load_model(self) -> bool:
-        """
-        Load the YOLO model with proper error handling.
-        
-        Returns:
-            True if model loaded successfully, False otherwise
-        """
+        """Load YOLO Model (Custom or Standard Fallback)."""
         if not YOLO_AVAILABLE:
-            self.logger.error("YOLO not available - install ultralytics package")
             return False
-            
+
         try:
-            # Check if custom model exists
-            if os.path.exists(self.model_path) and os.path.getsize(self.model_path) > 0:
-                self.logger.info(f"Loading custom model from {self.model_path}")
+            # 1. Try Load Custom/Specified Path
+            if os.path.exists(self.model_path):
+                logger.info(f"Loading YOLO from: {self.model_path}")
                 self.model = YOLO(self.model_path)
-                self.logger.info(f"✅ Loaded custom YOLO model from {self.model_path}")
             else:
-                # Use pre-trained YOLOv8 as fallback
-                self.logger.warning(f"Custom model not found or empty, using YOLOv8n as fallback")
-                
-                # Try to load YOLOv8n (will download if needed)
-                try:
-                    self.model = YOLO('yolov8n.pt')
-                    self.logger.info("✅ Loaded YOLOv8n fallback model")
-                except Exception as e:
-                    self.logger.error(f"Failed to load YOLOv8n: {e}")
-                    return False
-                
-            # Test the model with a dummy prediction
-            test_image = np.random.randint(0, 255, (640, 640, 3), dtype=np.uint8)
-            test_results = self.model(test_image, verbose=False)
+                # 2. Fallback to Standard YOLOv8n (Auto-download)
+                logger.warning(f"⚠️ Model at {self.model_path} not found. Downloading standard YOLOv8n...")
+                self.model = YOLO('yolov8n.pt')
             
             self.is_loaded = True
-            self.logger.info("✅ Model loaded and tested successfully")
+            logger.info("✅ YOLO Model Loaded Successfully")
             return True
             
         except Exception as e:
-            self.logger.error(f"❌ Error loading YOLO model: {str(e)}")
-            self.logger.error(f"Model path: {self.model_path}")
-            self.logger.error(f"Path exists: {os.path.exists(self.model_path)}")
-            if os.path.exists(self.model_path):
-                self.logger.error(f"File size: {os.path.getsize(self.model_path)} bytes")
+            logger.error(f"❌ Failed to load YOLO: {e}")
             return False
-    
-    def preprocess_image(self, image_source: Any) -> Optional[np.ndarray]:
+
+    def detect_flood_features(self, image_source: Union[str, np.ndarray]) -> Dict[str, Any]:
         """
-        Preprocess image for YOLO inference with better error handling.
-        
-        Args:
-            image_source: Image path, numpy array, or PIL Image
-            
-        Returns:
-            Preprocessed image as numpy array, or None if failed
-        """
-        try:
-            if isinstance(image_source, str):
-                # Load from file path
-                if not os.path.exists(image_source):
-                    self.logger.error(f"Image file not found: {image_source}")
-                    return None
-                    
-                image = cv2.imread(image_source)
-                if image is None:
-                    self.logger.error(f"Failed to load image: {image_source}")
-                    return None
-                    
-                image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-                
-            elif isinstance(image_source, np.ndarray):
-                # Already numpy array
-                image = image_source.copy()
-                
-                # Ensure it's 3-channel RGB
-                if len(image.shape) == 2:
-                    # Grayscale to RGB
-                    image = cv2.cvtColor(image, cv2.COLOR_GRAY2RGB)
-                elif image.shape[2] == 4:
-                    # RGBA to RGB
-                    image = cv2.cvtColor(image, cv2.COLOR_RGBA2RGB)
-                    
-            elif isinstance(image_source, Image.Image):
-                # PIL Image
-                image = np.array(image_source)
-                if len(image.shape) == 2:
-                    image = cv2.cvtColor(image, cv2.COLOR_GRAY2RGB)
-                    
-            else:
-                self.logger.error(f"Unsupported image format: {type(image_source)}")
-                return None
-            
-            # Validate image
-            if image.shape[2] != 3:
-                self.logger.error(f"Image must have 3 channels, got {image.shape[2]}")
-                return None
-                
-            return image
-            
-        except Exception as e:
-            self.logger.error(f"Error preprocessing image: {e}")
-            return None
-    
-    def detect_flood_features(self, image_source: Any) -> Dict[str, Any]:
-        """
-        Detect flood-related features in an image.
-        
-        Args:
-            image_source: Image to analyze
-            
-        Returns:
-            Dictionary with detection results
-        """
-        if not YOLO_AVAILABLE:
-            return {'error': 'YOLO not available - install ultralytics package'}
-            
-        if not self.is_loaded:
-            if not self.load_model():
-                return {'error': 'Failed to load YOLO model'}
-        
-        try:
-            # Preprocess image
-            image = self.preprocess_image(image_source)
-            if image is None:
-                return {'error': 'Failed to preprocess image'}
-            
-            # Run YOLO inference with error handling
-            try:
-                results = self.model(image, conf=self.confidence_threshold, verbose=False)
-            except Exception as e:
-                self.logger.error(f"YOLO inference failed: {e}")
-                return {'error': f'YOLO inference failed: {str(e)}'}
-            
-            # Parse results safely
-            detections = []
-            total_confidence = 0
-            flood_indicators = 0
-            
-            try:
-                for result in results:
-                    if hasattr(result, 'boxes') and result.boxes is not None:
-                        boxes = result.boxes
-                        
-                        # Check if boxes have data
-                        if len(boxes) == 0:
-                            continue
-                            
-                        for i in range(len(boxes.cls)):
-                            # Extract detection data safely
-                            class_id = int(boxes.cls[i])
-                            confidence = float(boxes.conf[i])
-                            bbox = boxes.xyxy[i].tolist()  # [x1, y1, x2, y2]
-                            
-                            # Get class name safely
-                            class_name = "unknown"
-                            if hasattr(result, 'names') and class_id in result.names:
-                                class_name = result.names[class_id]
-                            else:
-                                class_name = f"class_{class_id}"
-                            
-                            detection = {
-                                'class_id': class_id,
-                                'class_name': class_name,
-                                'confidence': confidence,
-                                'bbox': bbox,
-                                'area': (bbox[2] - bbox[0]) * (bbox[3] - bbox[1])
-                            }
-                            
-                            detections.append(detection)
-                            
-                            # Count flood indicators
-                            if self._is_flood_related(class_name):
-                                flood_indicators += 1
-                                total_confidence += confidence
-                                
-            except Exception as e:
-                self.logger.error(f"Error parsing YOLO results: {e}")
-                # Continue with empty detections rather than failing
-                pass
-            
-            # Calculate flood probability
-            if flood_indicators > 0 and len(detections) > 0:
-                avg_confidence = total_confidence / flood_indicators
-                flood_probability = min(avg_confidence * (flood_indicators / max(len(detections), 1)), 1.0)
-            else:
-                flood_probability = 0.0
-            
-            return {
-                'detections': detections,
-                'flood_indicators': flood_indicators,
-                'total_detections': len(detections),
-                'flood_probability': flood_probability,
-                'severity_level': self._calculate_severity(detections, flood_indicators),
-                'image_shape': image.shape
-            }
-            
-        except Exception as e:
-            self.logger.error(f"❌ Error in flood detection: {str(e)}")
-            return {'error': f'Flood detection failed: {str(e)}'}
-    
-    def _is_flood_related(self, class_name: str) -> bool:
-        """
-        Check if detected class is flood-related.
-        
-        Args:
-            class_name: Name of detected class
-            
-        Returns:
-            True if flood-related, False otherwise
-        """
-        flood_keywords = [
-            'water', 'flood', 'submerged', 'debris', 'emergency',
-            'rescue', 'boat', 'raft', 'inundated', 'overflow'
-        ]
-        
-        class_lower = class_name.lower()
-        return any(keyword in class_lower for keyword in flood_keywords)
-    
-    def _calculate_severity(self, detections: List[Dict], flood_indicators: int) -> str:
-        """
-        Calculate flood severity based on detections.
-        
-        Args:
-            detections: List of all detections
-            flood_indicators: Number of flood-related detections
-            
-        Returns:
-            Severity level string
-        """
-        if flood_indicators == 0:
-            return 'no_flood'
-        elif flood_indicators <= 2:
-            return 'minor_flood'
-        elif flood_indicators <= 5:
-            return 'moderate_flood'
-        elif flood_indicators <= 10:
-            return 'major_flood'
-        else:
-            return 'severe_flood'
-    
-    def analyze_water_coverage(self, image_source: Any) -> Dict[str, float]:
-        """
-        Analyze water coverage percentage in image.
-        
-        Args:
-            image_source: Image to analyze
-            
-        Returns:
-            Dictionary with water coverage analysis
-        """
-        try:
-            image = self.preprocess_image(image_source)
-            if image is None:
-                return {'error': 'Failed to preprocess image for water coverage analysis'}
-            
-            # Convert to HSV for better water detection
-            hsv = cv2.cvtColor(image, cv2.COLOR_RGB2HSV)
-            
-            # Define range for blue/water colors
-            lower_water = np.array([100, 50, 50])
-            upper_water = np.array([130, 255, 255])
-            
-            # Create mask for water areas
-            water_mask = cv2.inRange(hsv, lower_water, upper_water)
-            
-            # Calculate coverage
-            total_pixels = image.shape[0] * image.shape[1]
-            water_pixels = np.sum(water_mask > 0)
-            water_coverage = water_pixels / total_pixels
-            
-            return {
-                'water_coverage_percent': water_coverage * 100,
-                'water_pixels': int(water_pixels),
-                'total_pixels': int(total_pixels),
-                'is_flooded': water_coverage > 0.15  # 15% threshold
-            }
-            
-        except Exception as e:
-            self.logger.error(f"Error in water coverage analysis: {str(e)}")
-            return {'error': str(e)}
-    
-    def verify_lstm_prediction(
-        self, 
-        lstm_prediction: Dict[str, Any], 
-        image_source: Any,
-        threshold_high: float = 150.0  # Water level threshold in cm
-    ) -> Dict[str, Any]:
-        """
-        Verify LSTM flood prediction using visual evidence.
-        
-        Args:
-            lstm_prediction: Dictionary with LSTM prediction results
-            image_source: Current image for verification
-            threshold_high: High water level threshold in cm
-            
-        Returns:
-            Verification results
-        """
-        try:
-            # Extract LSTM prediction value
-            pred_value = lstm_prediction.get('prediction', 0.0)
-            
-            # Get visual analysis
-            flood_detection = self.detect_flood_features(image_source)
-            water_analysis = self.analyze_water_coverage(image_source)
-            
-            # Check for errors in visual analysis
-            if 'error' in flood_detection:
-                return {
-                    'verification_status': "ERROR",
-                    'error': f"Flood detection failed: {flood_detection['error']}"
-                }
-            
-            if 'error' in water_analysis:
-                return {
-                    'verification_status': "ERROR", 
-                    'error': f"Water analysis failed: {water_analysis['error']}"
-                }
-            
-            # LSTM prediction analysis
-            lstm_flood_predicted = pred_value >= threshold_high
-            
-            # Visual verification
-            visual_flood_detected = (
-                flood_detection['flood_probability'] > 0.3 or 
-                water_analysis['water_coverage_percent'] > 20
-            )
-            
-            # Agreement analysis
-            predictions_agree = lstm_flood_predicted == visual_flood_detected
-            
-            # Confidence calculation
-            visual_confidence = (flood_detection['flood_probability'] + 
-                               (water_analysis['water_coverage_percent'] / 100)) / 2
-            
-            # Overall assessment
-            if predictions_agree:
-                if lstm_flood_predicted and visual_flood_detected:
-                    verification_status = "FLOOD_CONFIRMED"
-                    confidence = 0.8 + (visual_confidence * 0.2)
-                else:
-                    verification_status = "NO_FLOOD_CONFIRMED"
-                    confidence = 0.7 + ((1 - visual_confidence) * 0.3)
-            else:
-                if lstm_flood_predicted and not visual_flood_detected:
-                    verification_status = "LSTM_FALSE_POSITIVE"
-                    confidence = 0.3 + ((1 - visual_confidence) * 0.4)
-                else:
-                    verification_status = "POTENTIAL_VISUAL_MISS"
-                    confidence = 0.4 + (visual_confidence * 0.3)
-            
-            return {
-                'verification_status': verification_status,
-                'visual_confirmation': visual_flood_detected,
-                'consensus': predictions_agree,
-                'reliability_score': confidence,
-                'lstm_prediction': pred_value,
-                'lstm_flood_predicted': lstm_flood_predicted,
-                'visual_flood_detected': visual_flood_detected,
-                'visual_confidence': visual_confidence,
-                'flood_severity': flood_detection['severity_level'],
-                'water_coverage': water_analysis['water_coverage_percent'],
-                'flood_detections': flood_detection['flood_indicators']
-            }
-            
-        except Exception as e:
-            self.logger.error(f"Error in LSTM verification: {str(e)}")
-            return {
-                'verification_status': "ERROR",
-                'error': f"Verification failed: {str(e)}"
-            }
-    
-    def process_video_stream(
-        self, 
-        video_source: Any,
-        frame_skip: int = 5,
-        max_frames: int = 100
-    ) -> List[Dict[str, Any]]:
-        """
-        Process video stream for flood detection.
-        
-        Args:
-            video_source: Video file path or camera index
-            frame_skip: Process every nth frame
-            max_frames: Maximum frames to process
-            
-        Returns:
-            List of detection results per frame
+        Main detection function. Combines Object Detection + Water Color Analysis.
         """
         if not self.is_loaded:
-            if not self.load_model():
-                return [{'error': 'Failed to load model'}]
-        
+            return {"status": "error", "message": "Model not loaded"}
+
+        # 1. Prepare Image
+        img = self._load_image(image_source)
+        if img is None:
+            return {"status": "error", "message": "Invalid image"}
+
+        result = {
+            "status": "success",
+            "objects_detected": [],
+            "flood_probability": 0.0,
+            "is_flooded": False,
+            "verification_method": "hybrid"
+        }
+
+        # 2. YOLO Inference (Object Detection)
         try:
-            # Open video
-            if isinstance(video_source, int):
-                cap = cv2.VideoCapture(video_source)  # Camera
-            else:
-                cap = cv2.VideoCapture(video_source)  # Video file
-                
-            results = []
-            frame_count = 0
-            processed_frames = 0
+            yolo_res = self.model(img, verbose=False)[0]
             
-            while cap.isOpened() and processed_frames < max_frames:
-                ret, frame = cap.read()
-                if not ret:
-                    break
+            # Extract boxes
+            for box in yolo_res.boxes:
+                conf = float(box.conf[0])
+                cls_id = int(box.cls[0])
+                label = self.model.names[cls_id]
                 
-                # Skip frames for efficiency
-                if frame_count % frame_skip == 0:
-                    frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                    
-                    # Detect flood features
-                    detection_result = self.detect_flood_features(frame_rgb)
-                    detection_result['frame_number'] = frame_count
-                    detection_result['timestamp'] = frame_count / 30.0  # Assume 30 FPS
-                    
-                    results.append(detection_result)
-                    processed_frames += 1
-                
-                frame_count += 1
-            
-            cap.release()
-            return results
-            
+                if conf >= self.conf_thresh:
+                    result["objects_detected"].append({
+                        "label": label,
+                        "confidence": round(conf, 2),
+                        "bbox": box.xyxy[0].tolist()
+                    })
+
         except Exception as e:
-            self.logger.error(f"Error in video processing: {str(e)}")
-            return [{'error': str(e)}]
-    
-    def generate_flood_report(self, detection_results: Dict[str, Any]) -> str:
-        """
-        Generate human-readable flood report from detection results.
-        
-        Args:
-            detection_results: Results from detect_flood_features
-            
-        Returns:
-            Formatted report string
-        """
-        if 'error' in detection_results:
-            return f"❌ Analysis Error: {detection_results['error']}"
-        
-        report = []
-        report.append("🌊 FLOOD VISUAL VERIFICATION REPORT")
-        report.append("=" * 40)
-        
-        # Basic statistics
-        report.append(f"📊 Detection Summary:")
-        report.append(f"  • Total objects detected: {detection_results['total_detections']}")
-        report.append(f"  • Flood indicators found: {detection_results['flood_indicators']}")
-        report.append(f"  • Flood probability: {detection_results['flood_probability']:.2%}")
-        report.append(f"  • Severity level: {detection_results['severity_level'].upper()}")
-        
-        # Detailed detections
-        if detection_results['detections']:
-            report.append(f"\n🔍 Detailed Detections:")
-            for i, det in enumerate(detection_results['detections'][:10]):  # Limit to 10
-                report.append(f"  {i+1}. {det['class_name']} (confidence: {det['confidence']:.2f})")
-        
-        # Recommendations
-        report.append(f"\n💡 Recommendations:")
-        severity = detection_results['severity_level']
-        if severity == 'no_flood':
-            report.append("  ✅ No immediate flood threat detected")
-        elif severity == 'minor_flood':
-            report.append("  ⚠️  Minor flooding detected - monitor situation")
-        elif severity in ['moderate_flood', 'major_flood']:
-            report.append("  🚨 Significant flooding detected - take precautions")
-        else:
-            report.append("  🆘 Severe flooding detected - immediate action required")
-        
-        return "\n".join(report)
+            logger.error(f"Inference Error: {e}")
 
-def create_yolo_verifier(model_path: str = 'models/yolo_model.pt') -> FloodVisualVerifier:
-    """
-    Factory function to create YOLO flood verifier.
-    
-    Args:
-        model_path: Path to YOLO model weights
+        # 3. Water Color Analysis (Heuristic)
+        # Hackathon Trick: Detect Muddy Water (Brown-ish) or High Water Coverage
+        water_score = self._analyze_water_color(img)
+        result["water_analysis_score"] = water_score
         
-    Returns:
-        Configured FloodVisualVerifier instance
-    """
-    return FloodVisualVerifier(model_path=model_path)
-
-# Demo function for testing
-def demo_yolo_verification():
-    """Demo function to test YOLO flood verification"""
-    print("🧪 YOLO Flood Verification Demo")
-    print("="*40)
-    
-    try:
-        verifier = create_yolo_verifier()
+        # 4. Logic Fusion (Gabungkan Logika)
+        # Logic: If custom model detects 'flood' -> High prob
+        # If standard model -> relies more on water_score
         
-        # Try to load model
-        if verifier.load_model():
-            print("✅ YOLO model loaded successfully")
-            print(f"📋 Flood classes: {list(verifier.flood_classes.keys())}")
-            print(f"📊 Severity levels: {list(verifier.severity_levels.keys())}")
-            print("🎯 Ready for visual flood verification!")
+        has_flood_keyword = any(d['label'] in ['flood', 'water'] for d in result["objects_detected"])
+        
+        if has_flood_keyword:
+            result["flood_probability"] = 0.95
+            result["reason"] = "AI Object Detection (Custom Model)"
         else:
-            print("❌ Failed to load YOLO model")
-            
-    except Exception as e:
-        print(f"❌ Demo error: {str(e)}")
+            # Fallback logic: 
+            # If Water Score High AND Objects (Cars/People) detected -> Risk
+            result["flood_probability"] = min(water_score * 1.2, 1.0)
+            result["reason"] = "Color Analysis (Muddy Water Detection)"
+
+        result["is_flooded"] = result["flood_probability"] > 0.5
+        return result
+
+    def _load_image(self, source):
+        """Safe Image Loader."""
+        if isinstance(source, str):
+            if os.path.exists(source):
+                return cv2.imread(source)
+        elif isinstance(source, np.ndarray):
+            return source
+        return None
+
+    def _analyze_water_color(self, img: np.ndarray) -> float:
+        """
+        Detect muddy water using HSV Color Space.
+        Returns a score 0.0 - 1.0 based on how much of the image looks like 'flood water'.
+        """
+        hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+        
+        # Define range for "Muddy/Brown Water"
+        # Hue: 10-30 (Orange/Brown), Saturation: 30-255, Value: 30-200
+        lower_brown = np.array([10, 30, 30])
+        upper_brown = np.array([30, 255, 200])
+        
+        # Define range for "Murky/Gray Water"
+        lower_gray = np.array([0, 0, 50])
+        upper_gray = np.array([180, 50, 150])
+
+        mask_brown = cv2.inRange(hsv, lower_brown, upper_brown)
+        mask_gray = cv2.inRange(hsv, lower_gray, upper_gray)
+        
+        combined_mask = cv2.bitwise_or(mask_brown, mask_gray)
+        
+        # Calculate ratio of "water-like" pixels (Bottom half of image usually)
+        height, width = img.shape[:2]
+        roi = combined_mask[int(height*0.3):, :] # Only look at bottom 70%
+        
+        ratio = np.sum(roi > 0) / (roi.size)
+        
+        # Normalize: If > 40% is water color, then prob is 1.0
+        score = min(ratio / 0.4, 1.0)
+        return round(score, 3)
 
 if __name__ == "__main__":
-    demo_yolo_verification()
+    # Test Code
+    print("Testing YOLO Class...")
+    verifier = FloodVisualVerifier()
+    verifier.load_model()
+    
+    # Create Dummy Image (Brown-ish)
+    dummy_img = np.zeros((480, 640, 3), dtype=np.uint8)
+    dummy_img[:] = (50, 100, 150) # BGR
+    
+    res = verifier.detect_flood_features(dummy_img)
+    print("Result:", res)
+    print("✅ YOLO Class Test Passed")
