@@ -1,36 +1,43 @@
 import sys
 import os
-import time
 import logging
+import time
 
-# Add /app to python path to allow imports from src.ml_core
-sys.path.append('/app')
-
-from src.pipeline import FloodTrainingPipeline
+# --- FIX PATH UNTUK LOCALHOST ---
+# Menambahkan current working directory (Root Project) ke sys.path
+# Ini wajib agar Python bisa menemukan modul 'src' dan 'services'
+sys.path.append(os.getcwd())
 
 # Setup Logger
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - [WORKER] - %(message)s')
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - [WORKER_MAIN] - %(message)s')
 logger = logging.getLogger("WorkerMain")
 
 def main():
-    logger.info("🤖 Training Worker Started")
-    
-    # Mode: One-off training or Scheduled?
-    # Untuk Hackathon/Demo: Jalan sekali saat container up, lalu sleep (biar container gak mati)
-    
+    logger.info("🤖 Training Worker Started (Local Mode)")
+    logger.info(f"📂 Working Directory: {os.getcwd()}")
+
     try:
+        # Import Pipeline secara dinamis setelah path diperbaiki
+        # Kita mengimpor class FloodTrainingPipeline dari file pipeline.py
+        from services.training_worker.src.pipeline import FloodTrainingPipeline
+        
+        logger.info("🚀 Initializing Pipeline...")
         pipeline = FloodTrainingPipeline()
+        
+        logger.info("▶️  Starting Training Run...")
         pipeline.run()
-        logger.info("✅ Job Done. Sleeping...")
+        
+        logger.info("✅ Training Job Completed. Model ready in 'models/' folder.")
+        
+    except ImportError as e:
+        logger.error(f"❌ Import Error: {e}")
+        logger.error("💡 TIPS: Pastikan kamu menjalankan script ini dari ROOT FOLDER project!")
+        logger.error("   Contoh: python services/training_worker/src/main.py")
         
     except Exception as e:
-        logger.error(f"❌ Job Failed: {e}")
+        logger.error(f"❌ Critical Error: {e}")
         import traceback
         traceback.print_exc()
-
-    # Keep container alive (optional, biar bisa debug kalau masuk ke container)
-    while True:
-        time.sleep(3600)
 
 if __name__ == "__main__":
     main()
