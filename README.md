@@ -145,10 +145,10 @@ Get model performance metrics.
 ## 👥 Team
 | Role | Person | Responsibility |
 |------|--------|-----------------|
-| API Backend | Ari Azis (EE) | `/predict`, `/detect`, integration |
-| ML Models | Informatika | LSTM, YOLOv8 training |
-| Frontend | STI | Dashboard, visualization |
-| Strategy | SBM | Pitch, BPBD relations |
+| API Backend | Ari Aziz | `/predict`, `/detect`, integration |
+| ML Models | Naufarrel | LSTM, YOLOv8 training |
+| Frontend | Tiffcu | Dashboard, visualization |
+| Strategy | Dejet | Pitch, BPBD relations |
 
 ## 📋 Required Libraries
 See `requirements.txt` for complete list.
