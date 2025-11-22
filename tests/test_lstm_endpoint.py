@@ -1,7 +1,7 @@
 import requests
 import json
 
-URL = "http://localhost:8000/predict"
+URL = "http://localhost:8001/predict"
 
 def test_predict():
     print("🧪 Testing /predict endpoint (LSTM)...")

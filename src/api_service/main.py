@@ -3,12 +3,16 @@ from pydantic import BaseModel
 from datetime import datetime
 from typing import List, Optional
 import numpy as np
+import pandas as pd
 import cv2
 from ultralytics import YOLO
 import os
 import tensorflow as tf
 from tensorflow.keras.models import load_model
 import joblib
+from src.ml_core.lstm_model import FloodLevelLSTM, create_lstm_model
+from src.ml_core.preprocesing import engineer_features, clean_data
+import json
 
 app = FastAPI(
     title="Jakarta FloodNet API",
@@ -33,23 +37,53 @@ try:
 except Exception as e:
     print(f"❌ Error loading YOLOv8 model: {e}")
 
-# 2. LSTM (Prediction)
+# 2. LSTM (Prediction) - Advanced with History Buffer
 lstm_model = None
-scaler = None
-LSTM_PATH = "models/lstm_model.h5"
-SCALER_PATH = "models/scaler.pkl"
+history_buffer = None
+LSTM_PATH = "models/lstm_flood_forecaster.h5"
+SCALER_PATH = "models/lstm_scaler" # Base path for scalers
+DATA_PATH = "data/DATASET_FINAL_TRAINING.csv"
 
 try:
-    if os.path.exists(LSTM_PATH) and os.path.exists(SCALER_PATH):
-        print(f"🚀 Loading LSTM model: {LSTM_PATH}")
-        lstm_model = load_model(LSTM_PATH)
-        print(f"🚀 Loading Scaler: {SCALER_PATH}")
-        scaler = joblib.load(SCALER_PATH)
-        print("✅ LSTM System loaded successfully!")
+    print("🚀 Initializing Advanced LSTM System...")
+    
+    # 1. Load Model
+    if os.path.exists(LSTM_PATH):
+        # Initialize model structure
+        lstm_model = FloodLevelLSTM()
+        # Load weights and scalers
+        lstm_model.load_model(LSTM_PATH, SCALER_PATH)
+        print(f"✅ LSTM Model loaded from {LSTM_PATH}")
     else:
-        print("⚠️ LSTM model or scaler not found. /predict will use dummy logic.")
+        print(f"❌ LSTM Model not found at {LSTM_PATH}")
+
+    # 2. Initialize History Buffer
+    # We need the last ~24-48 hours of data to calculate features (lags, rolling)
+    if os.path.exists(DATA_PATH):
+        print(f"📥 Loading initial history from {DATA_PATH}")
+        df_history = pd.read_csv(DATA_PATH)
+        
+        # Standardize columns
+        if 'Unnamed: 0' in df_history.columns:
+            df_history = df_history.drop('Unnamed: 0', axis=1)
+            
+        # Ensure we have the raw columns: timestamp, hujan_bogor, hujan_jakarta, tma_manggarai
+        # The CSV might already be processed or raw. Let's assume it matches the training data format.
+        # We'll keep the last 100 rows to be safe (need at least 24 for max lag)
+        history_buffer = df_history.tail(100).copy()
+        
+        # Ensure timestamp is datetime
+        history_buffer['timestamp'] = pd.to_datetime(history_buffer['timestamp'])
+        
+        print(f"✅ History buffer initialized with {len(history_buffer)} records")
+    else:
+        print("⚠️ Training data not found. History buffer empty. Predictions will fail until buffer fills.")
+        history_buffer = pd.DataFrame(columns=['timestamp', 'hujan_bogor', 'hujan_jakarta', 'tma_manggarai'])
+
 except Exception as e:
     print(f"❌ Error loading LSTM system: {e}")
+    import traceback
+    traceback.print_exc()
 
 
 # ===== PYDANTIC MODELS (Data Validation) =====
@@ -93,6 +127,7 @@ class PredictResponse(BaseModel):
     recommendation: str
     timestamp: str
     predicted_water_level_cm: float # Added this field
+    debug_info: Optional[str] = None # Debugging
 
 class DetectResponse(BaseModel):
     """Response dari endpoint /detect"""
@@ -127,45 +162,115 @@ async def predict(data: FloodInput):
     """
     predicted_tma = 0.0
     probability = 0.0
+    debug_msg = None
     
-    if lstm_model is not None and scaler is not None:
+    global history_buffer
+    
+    if lstm_model is not None and history_buffer is not None:
         try:
-            # 1. Prepare Input
-            # Model expects: [hujan_bogor, hujan_jakarta, tma_manggarai]
-            # We map input rainfall_mm to both rainfalls for simplicity
-            input_features = np.array([[data.rainfall_mm, data.rainfall_mm, data.water_level_cm]])
+            # 1. Update History Buffer
+            # Create new row
+            new_row = {
+                'timestamp': datetime.now(), # Use current time
+                'hujan_bogor': data.rainfall_mm, # Simplified mapping
+                'hujan_jakarta': data.rainfall_mm, # Simplified mapping
+                'tma_manggarai': data.water_level_cm
+            }
             
-            # 2. Scale
-            input_scaled = scaler.transform(input_features)
+            # Append to buffer
+            new_df = pd.DataFrame([new_row])
+            history_buffer = pd.concat([history_buffer, new_df], ignore_index=True)
             
-            # 3. Reshape for LSTM (Samples, TimeSteps, Features) -> (1, 1, 3)
-            input_reshaped = input_scaled.reshape((1, 1, 3))
+            # Keep buffer size manageable (e.g., last 100 rows)
+            if len(history_buffer) > 100:
+                history_buffer = history_buffer.iloc[-100:].reset_index(drop=True)
             
-            # 4. Predict
-            prediction_scaled = lstm_model.predict(input_reshaped, verbose=0)
-            val_scaled = prediction_scaled[0][0]
+            # 2. Feature Engineering
+            # We need to run the full pipeline on the buffer to generate features for the last row
+            # Note: engineer_features expects a clean dataframe
             
-            # 5. Inverse Scale
-            # We need to inverse transform using the same scaler (3 features)
-            # We construct a dummy array with the predicted value in the target column (index 2)
-            dummy_scaled = np.zeros((1, 3))
-            dummy_scaled[0, 2] = val_scaled
-            inverse_pred = scaler.inverse_transform(dummy_scaled)
-            predicted_tma = inverse_pred[0][2]
+            # Create a working copy
+            df_working = history_buffer.copy()
             
-            # 6. Calculate Risk/Probability
-            # Warning level is 850 cm.
-            # Probability = sigmoid-like function or linear ratio
-            probability = min(predicted_tma / 950.0, 1.0) # 950 as max reference
+            # Run engineering
+            # We use the same config as training (default in engineer_features)
+            df_features = engineer_features(df_working)
             
+            # 3. Prepare Input for Prediction
+            # Get the last row (current state)
+            if len(df_features) > 0:
+                last_row = df_features.iloc[[-1]] # Keep as DataFrame
+                
+                # The model.predict method in FloodLevelLSTM expects a 3D array (samples, timesteps, features)
+                # BUT, looking at lstm_model.py, the predict method takes 'X' which is passed to self.model.predict
+                # AND it has a scaler_X. 
+                # Wait, the `predict` method in `FloodLevelLSTM` (lines 254-273) does NOT scale the input X.
+                # It assumes X is already prepared (scaled and shaped).
+                # HOWEVER, `prepare_data` does the scaling.
+                # We need to manually scale the features using the loaded scaler_X.
+                
+                # Get feature columns expected by the model
+                feature_cols = lstm_model.feature_cols
+                
+                # Select only feature columns
+                X_input = last_row[feature_cols].values
+                
+                # Scale
+                X_scaled = lstm_model.scaler_X.transform(X_input)
+                
+                # Reshape: The model expects (samples, timesteps, features)
+                # Our trained model has sequence_length (e.g. 24).
+                # So we actually need the LAST 24 rows of scaled features, not just the last one.
+                
+                # Let's re-examine `create_sequences`.
+                # It takes `sequence_length` rows to make 1 sample.
+                
+                # We need to get the last `sequence_length` rows from `df_features`
+                seq_len = lstm_model.sequence_length
+                
+                if len(df_features) >= seq_len:
+                    # Get last seq_len rows
+                    X_seq = df_features[feature_cols].iloc[-seq_len:].values
+                    
+                    # Scale
+                    X_seq_scaled = lstm_model.scaler_X.transform(X_seq)
+                    
+                    # Reshape to (1, seq_len, n_features)
+                    X_final = X_seq_scaled.reshape(1, seq_len, -1)
+                    
+                    # 4. Predict
+                    # predict method returns inverse transformed value if inverse_transform=True
+                    prediction = lstm_model.predict(X_final, inverse_transform=True)
+                    predicted_tma = float(prediction[0])
+                    
+                    # 5. Calculate Probability
+                    # Warning level 850
+                    probability = min(predicted_tma / 950.0, 1.0)
+                else:
+                    print(f"⚠️ Not enough history for prediction. Need {seq_len}, have {len(df_features)}")
+                    # Fallback
+                    predicted_tma = data.water_level_cm
+                    probability = min((data.water_level_cm / 200 + data.rainfall_mm / 100) / 2, 1.0)
+            else:
+                 predicted_tma = data.water_level_cm
+                 probability = 0.0
+
         except Exception as e:
             print(f"❌ Prediction Error: {e}")
-            # Fallback to dummy
+            import traceback
+            traceback.print_exc()
+            # Fallback
             probability = min((data.water_level_cm / 200 + data.rainfall_mm / 100) / 2, 1.0)
+            predicted_tma = data.water_level_cm
+            debug_msg = f"Exception: {str(e)}"
     else:
-        # Fallback
+        # Fallback if model not loaded
         probability = min((data.water_level_cm / 200 + data.rainfall_mm / 100) / 2, 1.0)
-        predicted_tma = data.water_level_cm # No prediction
+        predicted_tma = data.water_level_cm
+        missing = []
+        if lstm_model is None: missing.append("lstm_model")
+        if history_buffer is None: missing.append("history_buffer")
+        debug_msg = f"System not ready. Missing: {', '.join(missing)}"
 
     confidence = 0.88
     
@@ -187,7 +292,8 @@ async def predict(data: FloodInput):
         "confidence": round(confidence, 3),
         "recommendation": recommendation,
         "timestamp": datetime.now().isoformat(),
-        "predicted_water_level_cm": round(float(predicted_tma), 2)
+        "predicted_water_level_cm": round(float(predicted_tma), 2),
+        "debug_info": debug_msg
     }
 
 @app.post("/detect", response_model=DetectResponse)
