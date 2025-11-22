@@ -3,13 +3,10 @@ uvicorn
 python-multipart
 pydantic
 requests
-# Machine Learning (Inference Only)
+numpy
+# Machine Learning (Inference)
 tensorflow-cpu
 ultralytics
-# Data Processing
-numpy
-pandas
 scikit-learn
-joblib
-# Image Processing (Headless = tanpa GUI, wajib buat Docker)
+# Image Proc (Headless)
 opencv-python-headless

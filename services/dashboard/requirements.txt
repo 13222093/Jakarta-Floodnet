@@ -3,6 +3,3 @@ requests
 pandas
 numpy
 plotly
-altair
-
-watchdog

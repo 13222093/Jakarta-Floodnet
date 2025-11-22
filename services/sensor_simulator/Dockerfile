@@ -2,12 +2,15 @@ FROM python:3.9-slim
 
 WORKDIR /app
 
-# Simulator butuh requests library
-RUN pip install requests pandas numpy
+# 1. Install dependencies
+COPY services/sensor_simulator/requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
 
-COPY src/data_acquisition /app/src/data_acquisition
-COPY services/sensor_simulator/sim_script.py /app/
+# 2. Copy Source Code
+COPY services/sensor_simulator/src /app/src
 
+# 3. Setup ENV
 ENV PYTHONPATH="${PYTHONPATH}:/app"
 
-CMD ["python", "sim_script.py"]
+# 4. Run Simulator
+CMD ["python", "src/main.py"]

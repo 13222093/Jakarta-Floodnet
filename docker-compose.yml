@@ -1,3 +1,5 @@
+version: '3.8'
+
 services:
   api_gateway:
     build:
@@ -5,9 +7,9 @@ services:
       dockerfile: services/api_gateway/Dockerfile
     container_name: floodnet_api
     ports:
-      - "8000:8000"
+      - "${API_PORT}:8000"  # Mapping port dari .env
     volumes:
-      - ./models:/app/models
+      - ${HOST_MODEL_PATH}:/app/models # Mapping folder models dari .env
     environment:
       - MODEL_PATH=/app/models/best_model_modular.h5
       - YOLO_PATH=/app/models/yolov8n.pt
@@ -21,9 +23,9 @@ services:
       dockerfile: services/dashboard/Dockerfile
     container_name: floodnet_dashboard
     ports:
-      - "8501:8501"
+      - "${DASHBOARD_PORT}:8501" # Mapping port dari .env
     environment:
-      - API_URL=http://api_gateway:8000
+      - API_URL=${INTERNAL_API_URL} # URL API dinamis
     depends_on:
       - api_gateway
     networks:
@@ -35,8 +37,8 @@ services:
       dockerfile: services/training_worker/Dockerfile
     container_name: floodnet_trainer
     volumes:
-      - ./data:/app/data      # Baca data CSV mentah dari Host
-      - ./models:/app/models  # Tulis hasil model .h5 ke Host
+      - ${HOST_DATA_PATH}:/app/data      # Baca data dari path di .env
+      - ${HOST_MODEL_PATH}:/app/models   # Tulis model ke path di .env
     environment:
       - DATA_PATH=/app/data
       - SAVE_PATH=/app/models
@@ -49,8 +51,8 @@ services:
       dockerfile: services/sensor_simulator/Dockerfile
     container_name: floodnet_simulator
     environment:
-      - API_URL=http://api_gateway:8000
-      - INTERVAL=5 
+      - API_URL=${INTERNAL_API_URL}
+      - INTERVAL=${SIMULATOR_INTERVAL}   # Interval dari .env
     depends_on:
       - api_gateway
     networks:
