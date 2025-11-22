@@ -1,0 +1,15 @@
+fastapi
+uvicorn
+python-multipart
+pydantic
+requests
+# Machine Learning (Inference Only)
+tensorflow-cpu
+ultralytics
+# Data Processing
+numpy
+pandas
+scikit-learn
+joblib
+# Image Processing (Headless = tanpa GUI, wajib buat Docker)
+opencv-python-headless
