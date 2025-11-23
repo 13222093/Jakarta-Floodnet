@@ -10,8 +10,17 @@ import os
 import tensorflow as tf
 from tensorflow.keras.models import load_model
 import joblib
-from src.ml_core.lstm_model import FloodLevelLSTM, create_lstm_model
-from src.ml_core.preprocesing import engineer_features, clean_data
+import sys
+import os
+
+try:
+    from src.ml_core.lstm_model import FloodLevelLSTM, create_lstm_model
+    from src.ml_core.preprocesing import engineer_features, clean_data
+except ImportError as e:
+    # Fallback for when running directly or in different context
+    sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
+    from src.ml_core.lstm_model import FloodLevelLSTM, create_lstm_model
+    from src.ml_core.preprocesing import engineer_features, clean_data
 import json
 
 app = FastAPI(
@@ -90,18 +99,17 @@ except Exception as e:
 
 class FloodInput(BaseModel):
     """Input untuk prediksi banjir"""
-    rainfall_mm: float  # Curah hujan dalam mm (Bogor + Jakarta avg?) -> For now we assume this is a feature
-    water_level_cm: float  # Ketinggian Muka Air dalam cm
-    location_id: str  # ID lokasi (ex: MANGGARAI_01)
-    # Note: Our model was trained on [hujan_bogor, hujan_jakarta, tma_manggarai]
-    # We need to map input to these 3 features.
-    # For MVP: We'll assume 'rainfall_mm' maps to BOTH bogor and jakarta (simplified)
-    
+    hujan_bogor: float
+    hujan_jakarta: float
+    tma_saat_ini: float
+    location_id: Optional[str] = "MANGGARAI"
+
     class Config:
         schema_extra = {
             "example": {
-                "rainfall_mm": 15.5,
-                "water_level_cm": 150,
+                "hujan_bogor": 15.5,
+                "hujan_jakarta": 10.0,
+                "tma_saat_ini": 150.0,
                 "location_id": "MANGGARAI_01"
             }
         }
@@ -172,9 +180,9 @@ async def predict(data: FloodInput):
             # Create new row
             new_row = {
                 'timestamp': datetime.now(), # Use current time
-                'hujan_bogor': data.rainfall_mm, # Simplified mapping
-                'hujan_jakarta': data.rainfall_mm, # Simplified mapping
-                'tma_manggarai': data.water_level_cm
+                'hujan_bogor': data.hujan_bogor,
+                'hujan_jakarta': data.hujan_jakarta,
+                'tma_manggarai': data.tma_saat_ini
             }
             
             # Append to buffer
@@ -238,35 +246,104 @@ async def predict(data: FloodInput):
                     # Reshape to (1, seq_len, n_features)
                     X_final = X_seq_scaled.reshape(1, seq_len, -1)
                     
-                    # 4. Predict
+                    # 4. Get Raw LSTM Prediction
                     # predict method returns inverse transformed value if inverse_transform=True
                     prediction = lstm_model.predict(X_final, inverse_transform=True)
-                    predicted_tma = float(prediction[0])
+                    pred_lstm_raw = float(prediction[0])
+                    
+                    # ===== ADVANCED PHYSICS ENGINE =====
+                    # --- 1. Dynamic Weighting (Confidence-based) ---
+                    # Calculate deviation between AI prediction and Current Reality
+                    deviation = abs(pred_lstm_raw - data.tma_saat_ini)
+                    
+                    if deviation > 200: 
+                        # AI is hallucinating (too far), trust it very little
+                        ai_weight = 0.05
+                        physics_weight = 0.95
+                    elif deviation > 100:
+                        # AI is drifting, trust moderately
+                        ai_weight = 0.15
+                        physics_weight = 0.85
+                    else:
+                        # AI is reasonable, trust it more
+                        ai_weight = 0.30
+                        physics_weight = 0.70
+                    
+                    weighted_prediction = (data.tma_saat_ini * physics_weight) + (pred_lstm_raw * ai_weight)
+
+                    # --- 2. Proportional Rainfall Bias ---
+                    base_level = max(data.tma_saat_ini, 100) # Avoid zero division logic
+                    rain_bias = 0
+                    
+                    if data.hujan_bogor > 50 or data.hujan_jakarta > 50:
+                        rain_bias = base_level * 0.05  # +5% boost for extreme rain
+                    elif data.hujan_bogor > 20 or data.hujan_jakarta > 20:
+                        rain_bias = base_level * 0.02  # +2% boost for heavy rain
+                        
+                    # Cap bias to avoid explosions (max 50cm boost)
+                    rain_bias = min(rain_bias, 50.0)
+                    
+                    temp_pred = weighted_prediction + rain_bias
+
+                    # --- 3. SANITY CHECKS (The Safety Net) ---
+                    final_prediction = temp_pred
+                    
+                    # Rule A: Water Logic - If raining heavily, water CANNOT drop below current level
+                    if (data.hujan_bogor > 20 or data.hujan_jakarta > 20):
+                        final_prediction = max(final_prediction, data.tma_saat_ini)
+                        
+                    # Rule B: Max Hourly Change (Physical limit)
+                    # Water rarely jumps > 100cm in 1 hour. Dampen the spike if needed.
+                    max_change = 100.0
+                    if abs(final_prediction - data.tma_saat_ini) > max_change:
+                        if final_prediction > data.tma_saat_ini:
+                            final_prediction = data.tma_saat_ini + max_change
+                        else:
+                            final_prediction = data.tma_saat_ini - (max_change * 0.5) # Drop is slower than rise
+
+                    # Final Formatting
+                    predicted_tma = round(max(final_prediction, 0.0), 2)
                     
                     # 5. Calculate Probability
                     # Warning level 850
                     probability = min(predicted_tma / 950.0, 1.0)
                 else:
                     print(f"⚠️ Not enough history for prediction. Need {seq_len}, have {len(df_features)}")
-                    # Fallback
-                    predicted_tma = data.water_level_cm
-                    probability = min((data.water_level_cm / 200 + data.rainfall_mm / 100) / 2, 1.0)
+                    # Fallback with physics
+                    predicted_tma = data.tma_saat_ini
+                    # Add rain bias
+                    if data.hujan_bogor > 50 or data.hujan_jakarta > 50:
+                        predicted_tma += data.tma_saat_ini * 0.05
+                    elif data.hujan_bogor > 20 or data.hujan_jakarta > 20:
+                        predicted_tma += data.tma_saat_ini * 0.02
+                    predicted_tma = round(predicted_tma, 2)
+                    probability = min((data.tma_saat_ini / 200 + (data.hujan_bogor + data.hujan_jakarta) / 200) / 2, 1.0)
             else:
-                 predicted_tma = data.water_level_cm
+                 predicted_tma = data.tma_saat_ini
                  probability = 0.0
 
         except Exception as e:
             print(f"❌ Prediction Error: {e}")
             import traceback
             traceback.print_exc()
-            # Fallback
-            probability = min((data.water_level_cm / 200 + data.rainfall_mm / 100) / 2, 1.0)
-            predicted_tma = data.water_level_cm
+            # Fallback with physics
+            predicted_tma = data.tma_saat_ini
+            if data.hujan_bogor > 50 or data.hujan_jakarta > 50:
+                predicted_tma += data.tma_saat_ini * 0.05
+            elif data.hujan_bogor > 20 or data.hujan_jakarta > 20:
+                predicted_tma += data.tma_saat_ini * 0.02
+            predicted_tma = round(predicted_tma, 2)
+            probability = min((data.tma_saat_ini / 200 + (data.hujan_bogor + data.hujan_jakarta) / 200) / 2, 1.0)
             debug_msg = f"Exception: {str(e)}"
     else:
-        # Fallback if model not loaded
-        probability = min((data.water_level_cm / 200 + data.rainfall_mm / 100) / 2, 1.0)
-        predicted_tma = data.water_level_cm
+        # Fallback if model not loaded - use physics
+        predicted_tma = data.tma_saat_ini
+        if data.hujan_bogor > 50 or data.hujan_jakarta > 50:
+            predicted_tma += data.tma_saat_ini * 0.05
+        elif data.hujan_bogor > 20 or data.hujan_jakarta > 20:
+            predicted_tma += data.tma_saat_ini * 0.02
+        predicted_tma = round(predicted_tma, 2)
+        probability = min((data.tma_saat_ini / 200 + (data.hujan_bogor + data.hujan_jakarta) / 200) / 2, 1.0)
         missing = []
         if lstm_model is None: missing.append("lstm_model")
         if history_buffer is None: missing.append("history_buffer")
