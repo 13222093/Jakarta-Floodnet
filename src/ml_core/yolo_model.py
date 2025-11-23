@@ -9,11 +9,12 @@ import numpy as np
 import os
 import logging
 from typing import List, Dict, Any, Optional, Union
+from inference_sdk import InferenceHTTPClient
 
 # Setup Logger
 logger = logging.getLogger(__name__)
 
-# Try Import Ultralytics
+# Try Import Ultralytics (Optional now, but good for fallback if needed)
 try:
     from ultralytics import YOLO
     YOLO_AVAILABLE = True
@@ -23,8 +24,7 @@ except ImportError:
 
 class FloodVisualVerifier:
     """
-    Visual Verification System using YOLO + Color Analysis.
-    Designed to work even if Custom Flood Model is not ready (Fallbacks to heuristics).
+    Visual Verification System using Roboflow Workflow.
     """
     
     def __init__(self, model_path: str = 'models/yolov8n.pt', confidence_threshold: float = 0.4):
@@ -32,95 +32,128 @@ class FloodVisualVerifier:
         self.conf_thresh = confidence_threshold
         self.model = None
         self.is_loaded = False
+        self.client = None
         
-        # COCO Classes that *might* be relevant in flood context (vehicles stuck, people)
-        self.relevant_coco_classes = [0, 1, 2, 3, 5, 7] # person, bicycle, car, motorcycle, bus, truck
-        
-    def load_model(self) -> bool:
-        """Load YOLO Model (Custom or Standard Fallback)."""
-        if not YOLO_AVAILABLE:
-            return False
-
+        # Roboflow Client
         try:
-            # 1. Try Load Custom/Specified Path
-            if os.path.exists(self.model_path):
-                logger.info(f"Loading YOLO from: {self.model_path}")
-                self.model = YOLO(self.model_path)
-            else:
-                # 2. Fallback to Standard YOLOv8n (Auto-download)
-                logger.warning(f"⚠️ Model at {self.model_path} not found. Downloading standard YOLOv8n...")
-                self.model = YOLO('yolov8n.pt')
-            
+            # Load API Key from Env or Fallback
+            api_key = os.getenv("ROBOFLOW_API_KEY")
+            if not api_key:
+                logger.warning("⚠️ ROBOFLOW_API_KEY not found in environment variables. Using fallback.")
+                api_key = "kI2MJW8A3nh8M8MdgyR4" # Fallback (User provided)
+
+            self.client = InferenceHTTPClient(
+                api_url="https://serverless.roboflow.com",
+                api_key=api_key
+            )
             self.is_loaded = True
-            logger.info("✅ YOLO Model Loaded Successfully")
-            return True
-            
+            logger.info("✅ Roboflow Client Initialized")
         except Exception as e:
-            logger.error(f"❌ Failed to load YOLO: {e}")
-            return False
+            logger.error(f"❌ Failed to init Roboflow: {e}")
+            self.is_loaded = False
+
+    def load_model(self) -> bool:
+        """Legacy load method - kept for compatibility."""
+        return self.is_loaded
 
     def detect_flood_features(self, image_source: Union[str, np.ndarray]) -> Dict[str, Any]:
         """
-        Main detection function. Combines Object Detection + Water Color Analysis.
+        Main detection function using Roboflow Workflow.
         """
-        if not self.is_loaded:
-            return {"status": "error", "message": "Model not loaded"}
-
-        # 1. Prepare Image
-        img = self._load_image(image_source)
-        if img is None:
-            return {"status": "error", "message": "Invalid image"}
-
-        result = {
-            "status": "success",
-            "objects_detected": [],
-            "flood_probability": 0.0,
+        default_response = {
             "is_flooded": False,
-            "verification_method": "hybrid"
+            "flood_probability": 0.0,
+            "objects_detected": []
         }
 
-        # 2. YOLO Inference (Object Detection)
+        if not self.is_loaded or self.client is None:
+            return default_response
+
+        # 1. Prepare Image
+        temp_filename = "temp_inference.jpg"
+        image_path = image_source
+        
         try:
-            yolo_res = self.model(img, verbose=False)[0]
+            # Handle Numpy Array (from OpenCV)
+            if isinstance(image_source, np.ndarray):
+                cv2.imwrite(temp_filename, image_source)
+                image_path = temp_filename
+            elif isinstance(image_source, str):
+                if not os.path.exists(image_source):
+                     return default_response
+            else:
+                return default_response
+
+            # 2. Run Roboflow Workflow
+            # Workflow ID: detect-count-and-visualize
+            result = self.client.run_workflow(
+                workspace_name="ari-aziz",
+                workflow_id="detect-count-and-visualize",
+                images={
+                    "image": image_path
+                },
+                use_cache=True
+            )
             
-            # Extract boxes
-            for box in yolo_res.boxes:
-                conf = float(box.conf[0])
-                cls_id = int(box.cls[0])
-                label = self.model.names[cls_id]
+            # 3. Parse Results
+            # Expected Structure: [{'predictions': {'predictions': [{'class': 'flood', ...}]}}]
+            predictions = []
+            
+            if isinstance(result, list) and len(result) > 0:
+                # Get the first image result
+                image_result = result[0]
                 
-                if conf >= self.conf_thresh:
-                    result["objects_detected"].append({
-                        "label": label,
-                        "confidence": round(conf, 2),
-                        "bbox": box.xyxy[0].tolist()
-                    })
+                # Check for nested predictions (Workflow output)
+                if 'predictions' in image_result:
+                    preds_data = image_result['predictions']
+                    
+                    # If it's a dictionary containing 'predictions' list (Nested case)
+                    if isinstance(preds_data, dict) and 'predictions' in preds_data:
+                        predictions = preds_data['predictions']
+                    # If it's directly a list (Standard inference case)
+                    elif isinstance(preds_data, list):
+                        predictions = preds_data
+                    # If it's just a dict but not nested (Single prediction?)
+                    elif isinstance(preds_data, dict):
+                        predictions = [preds_data]
+            
+            objects_detected = []
+            flood_prob = 0.0
+            
+            # Check for flood class or water class
+            flood_detected = False
+            
+            for pred in predictions:
+                # Roboflow prediction structure usually has 'class', 'confidence'
+                label = pred.get('class', 'unknown')
+                conf = pred.get('confidence', 0.0)
+                
+                objects_detected.append(label)
+                
+                if label.lower() in ['flood', 'water', 'flooded', 'puddle']:
+                    flood_detected = True
+                    flood_prob = max(flood_prob, conf)
+
+            # Clean up temp file
+            if isinstance(image_source, np.ndarray) and os.path.exists(temp_filename):
+                os.remove(temp_filename)
+
+            return {
+                "is_flooded": flood_detected,
+                "flood_probability": float(flood_prob),
+                "objects_detected": list(set(objects_detected)) # Unique strings
+            }
 
         except Exception as e:
-            logger.error(f"Inference Error: {e}")
-
-        # 3. Water Color Analysis (Heuristic)
-        # Hackathon Trick: Detect Muddy Water (Brown-ish) or High Water Coverage
-        water_score = self._analyze_water_color(img)
-        result["water_analysis_score"] = water_score
-        
-        # 4. Logic Fusion (Gabungkan Logika)
-        # Logic: If custom model detects 'flood' -> High prob
-        # If standard model -> relies more on water_score
-        
-        has_flood_keyword = any(d['label'] in ['flood', 'water'] for d in result["objects_detected"])
-        
-        if has_flood_keyword:
-            result["flood_probability"] = 0.95
-            result["reason"] = "AI Object Detection (Custom Model)"
-        else:
-            # Fallback logic: 
-            # If Water Score High AND Objects (Cars/People) detected -> Risk
-            result["flood_probability"] = min(water_score * 1.2, 1.0)
-            result["reason"] = "Color Analysis (Muddy Water Detection)"
-
-        result["is_flooded"] = result["flood_probability"] > 0.5
-        return result
+            logger.error(f"❌ Roboflow Inference Error: {e}")
+            # Clean up temp file if exists
+            if os.path.exists(temp_filename):
+                try:
+                    os.remove(temp_filename)
+                except:
+                    pass
+            # Return default False as requested
+            return default_response
 
     def _load_image(self, source):
         """Safe Image Loader."""
@@ -133,34 +166,9 @@ class FloodVisualVerifier:
 
     def _analyze_water_color(self, img: np.ndarray) -> float:
         """
-        Detect muddy water using HSV Color Space.
-        Returns a score 0.0 - 1.0 based on how much of the image looks like 'flood water'.
+        Legacy method - kept for reference
         """
-        hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
-        
-        # Define range for "Muddy/Brown Water"
-        # Hue: 10-30 (Orange/Brown), Saturation: 30-255, Value: 30-200
-        lower_brown = np.array([10, 30, 30])
-        upper_brown = np.array([30, 255, 200])
-        
-        # Define range for "Murky/Gray Water"
-        lower_gray = np.array([0, 0, 50])
-        upper_gray = np.array([180, 50, 150])
-
-        mask_brown = cv2.inRange(hsv, lower_brown, upper_brown)
-        mask_gray = cv2.inRange(hsv, lower_gray, upper_gray)
-        
-        combined_mask = cv2.bitwise_or(mask_brown, mask_gray)
-        
-        # Calculate ratio of "water-like" pixels (Bottom half of image usually)
-        height, width = img.shape[:2]
-        roi = combined_mask[int(height*0.3):, :] # Only look at bottom 70%
-        
-        ratio = np.sum(roi > 0) / (roi.size)
-        
-        # Normalize: If > 40% is water color, then prob is 1.0
-        score = min(ratio / 0.4, 1.0)
-        return round(score, 3)
+        return 0.0
 
 if __name__ == "__main__":
     # Test Code
