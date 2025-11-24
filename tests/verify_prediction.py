@@ -1,7 +1,7 @@
 import requests
 import json
 
-URL = "http://localhost:8001/predict"
+URL = "http://localhost:8000/predict"
 
 def test(rainfall, water_level):
     print(f"Testing with Rainfall={rainfall}, WaterLevel={water_level}")
@@ -11,11 +11,29 @@ def test(rainfall, water_level):
         "location_id": "MANGGARAI_01"
     }
     try:
-        res = requests.post(URL, json=payload).json()
-        pred = res.get('predicted_water_level_cm')
-        rec = res.get('recommendation')
-        print(f"  -> Predicted: {pred}")
-        print(f"  -> Recommendation: {rec}")
+        response = requests.post(URL, json=payload)
+        
+        # Cek kalau server error (bukan 200 OK)
+        if response.status_code != 200:
+            print(f"  -> Server Error: {response.text}")
+            return None
+
+        res = response.json()
+        
+        # --- PERBAIKAN DI SINI ---
+        # Sesuaikan key dengan output di main.py
+        pred = res.get('prediction_cm')      # Dulu: predicted_water_level_cm
+        rec = res.get('alert_message')       # Dulu: recommendation
+        status = res.get('status')
+        risk = res.get('risk_level')
+        
+        print(f"  -> Status: {status}")
+        print(f"  -> Predicted Level: {pred} cm")
+        print(f"  -> Risk: {risk}")
+        print(f"  -> Message: {rec}")
+        
+        return pred
+        
         return pred
     except Exception as e:
         print(f"  -> Error: {e}")

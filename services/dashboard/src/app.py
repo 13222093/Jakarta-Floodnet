@@ -1,104 +1,295 @@
+"""
+Jakarta FloodNet Dashboard
+===========================
+Entry Point untuk Dashboard Monitoring Banjir berbasis Streamlit
+
+Author: Jakarta FloodNet Team
+Date: November 2025
+"""
+
 import streamlit as st
-import requests
-import pandas as pd
-import numpy as np
-import plotly.graph_objects as go
-import time
-import os
+import sys
+from pathlib import Path
 
-# Konfigurasi Halaman
-st.set_page_config(page_title="Jakarta FloodNet", page_icon="🌊", layout="wide")
+# Add components to path
+sys.path.insert(0, str(Path(__file__).parent))
 
-# --- FIX URL UNTUK LOCALHOST ---
-# Default ke localhost:8000 jika tidak ada ENV
-API_URL = os.getenv("API_URL", "http://localhost:8000")
+from components import (
+    api_client,
+    sidebar_info,
+    connection_status_badge,
+    error_message,
+    inject_responsive_css
+)
+
+# ==================== PAGE CONFIGURATION ====================
+st.set_page_config(
+    page_title="Jakarta FloodNet Dashboard",
+    page_icon="🌊",
+    layout="wide",
+    initial_sidebar_state="auto",  # Changed to auto for better mobile UX
+    menu_items={
+        'Get Help': 'https://github.com/Jakarta-FloodNet',
+        'Report a bug': 'https://github.com/Jakarta-FloodNet/issues',
+        'About': """
+        # Jakarta FloodNet 🌊
+        
+        Sistem Monitoring dan Prediksi Banjir berbasis AI
+        
+        **Fitur Utama:**
+        - Prediksi ketinggian air dengan LSTM
+        - Verifikasi visual dengan YOLO
+        - Real-time monitoring
+        
+        **Teknologi:**
+        - Frontend: Streamlit
+        - Backend: FastAPI
+        - ML: TensorFlow, PyTorch
+        """
+    }
+)
+
+# ==================== CUSTOM CSS ====================
+inject_responsive_css()
 
 st.markdown("""
     <style>
-    .main { background-color: #0e1117; }
-    .stMetric { background-color: #262730; padding: 15px; border-radius: 10px; }
+    /* Main styling */
+    .main {
+        padding: 2rem;
+    }
+    
+    /* Sidebar styling */
+    .css-1d391kg {
+        padding: 2rem 1rem;
+    }
+    
+    /* Remove extra padding */
+    .block-container {
+        padding-top: 2rem;
+        padding-bottom: 2rem;
+    }
+    
+    /* Card styling */
+    .stMetric {
+        background-color: #f8f9fa;
+        padding: 1rem;
+        border-radius: 8px;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+    
+    /* Button styling */
+    .stButton>button {
+        width: 100%;
+        border-radius: 8px;
+        font-weight: 600;
+        padding: 0.75rem 1rem;
+    }
+    
+    /* File uploader */
+    .uploadedFile {
+        border-radius: 8px;
+    }
+    
+    /* Success/Error messages */
+    .stAlert {
+        border-radius: 8px;
+    }
+    
+    /* Responsive header */
+    @media (max-width: 768px) {
+        .main h1 {
+            font-size: 1.5rem !important;
+        }
+    }
     </style>
+""", unsafe_allow_html=True)
+
+# ==================== SIDEBAR ====================
+with st.sidebar:
+    st.markdown("# 🌊 Jakarta FloodNet")
+    st.markdown("### Sistem Monitoring Banjir AI")
+    st.markdown("---")
+    
+    # Check API connection
+    st.markdown("#### 🔌 Status Koneksi")
+    health = api_client.check_health()
+    
+    if health['success']:
+        connection_status_badge(True)
+        st.caption(f"✓ {health['message']}")
+    else:
+        connection_status_badge(False)
+        st.caption(f"✗ {health['message']}")
+    
+    st.markdown("---")
+    
+    # Navigation info
+    st.markdown("""
+        #### 📱 Navigasi
+        Gunakan menu di atas untuk:
+        - 📊 **Dashboard Utama**: Monitoring real-time
+        - 🔮 **Prediksi Banjir**: Kalkulator LSTM
+        - 👁️ **Verifikasi Visual**: Analisis gambar YOLO
+    """)
+    
+    # Add sidebar info
+    sidebar_info()
+
+# ==================== MAIN PAGE ====================
+st.markdown("""
+    <div style="
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        padding: 3rem 2rem;
+        border-radius: 16px;
+        margin-bottom: 2rem;
+        color: white;
+        text-align: center;
+    ">
+        <h1 style="margin: 0; font-size: 3rem; font-weight: 800;">
+            🌊 Jakarta FloodNet
+        </h1>
+        <p style="margin: 1rem 0 0 0; font-size: 1.5rem; opacity: 0.95;">
+            Sistem Monitoring dan Prediksi Banjir Berbasis AI
+        </p>
+    </div>
+""", unsafe_allow_html=True)
+
+# Welcome section
+col1, col2, col3 = st.columns(3)
+
+with col1:
+    st.markdown("""
+        <div style="
+            background: linear-gradient(135deg, #667eea20 0%, #764ba220 100%);
+            padding: 2rem;
+            border-radius: 12px;
+            text-align: center;
+            height: 100%;
+        ">
+            <div style="font-size: 3rem; margin-bottom: 1rem;">�</div>
+            <h3 style="margin: 0;">Prediksi LSTM</h3>
+            <p style="margin: 0.5rem 0 0 0; color: #6b7280;">
+                Forecasting ketinggian air berdasarkan data curah hujan
+            </p>
+        </div>
     """, unsafe_allow_html=True)
 
-st.title("🌊 Jakarta FloodNet Command Center")
-st.markdown(f"### AI-Powered Early Warning System (Connected to: `{API_URL}`)")
+with col2:
+    st.markdown("""
+        <div style="
+            background: linear-gradient(135deg, #667eea20 0%, #764ba220 100%);
+            padding: 2rem;
+            border-radius: 12px;
+            text-align: center;
+            height: 100%;
+        ">
+            <div style="font-size: 3rem; margin-bottom: 1rem;">👁️</div>
+            <h3 style="margin: 0;">Verifikasi Visual</h3>
+            <p style="margin: 0.5rem 0 0 0; color: #6b7280;">
+                Deteksi kondisi banjir menggunakan YOLO computer vision
+            </p>
+        </div>
+    """, unsafe_allow_html=True)
 
-# Cek Koneksi
-try:
-    health = requests.get(f"{API_URL}/health", timeout=2).json()
-    st.sidebar.success("🟢 API Connection: Online")
-    st.sidebar.json(health['models'])
-except:
-    st.sidebar.error("🔴 API Connection: Offline")
-    st.sidebar.info(f"Pastikan API jalan di {API_URL}")
+with col3:
+    st.markdown("""
+        <div style="
+            background: linear-gradient(135deg, #667eea20 0%, #764ba220 100%);
+            padding: 2rem;
+            border-radius: 12px;
+            text-align: center;
+            height: 100%;
+        ">
+            <div style="font-size: 3rem; margin-bottom: 1rem;">📊</div>
+            <h3 style="margin: 0;">Real-time Monitor</h3>
+            <p style="margin: 0.5rem 0 0 0; color: #6b7280;">
+                Monitoring status dan tren ketinggian air secara real-time
+            </p>
+        </div>
+    """, unsafe_allow_html=True)
 
-tab1, tab2 = st.tabs(["📊 Live Monitoring", "👁️ CCTV Intelligence"])
+st.markdown("---")
 
-with tab1:
-    col1, col2 = st.columns([1, 3])
-    with col1:
-        st.subheader("🎛️ Sensor Control")
-        mode = st.radio("Mode Input", ["Manual Slider", "Auto Simulation ⚡"])
-        if mode == "Manual Slider":
-            rain = st.slider("Curah Hujan (mm/jam)", 0.0, 100.0, 15.5)
-            water = st.slider("TMA Manggarai (cm)", 50.0, 1000.0, 650.0)
-            delay = 0
-        else:
-            st.info("Simulating sensor data...")
-            rain = np.random.gamma(2, 2) * 5
-            water = np.random.normal(700, 100)
-            delay = 2
-            
-    with col2:
-        metrics_container = st.container()
-        chart_container = st.empty()
+# Quick Start Guide
+st.markdown("## 🚀 Panduan Cepat")
+
+st.markdown("""
+### Cara Menggunakan Dashboard
+
+1. **📊 Dashboard Utama**
+   - Lihat status terkini sistem monitoring
+   - Monitor tren ketinggian air
+   - Cek health status semua komponen
+
+2. **🔮 Prediksi Banjir (LSTM)**
+   - Masukkan data curah hujan Bogor dan Jakarta
+   - Klik tombol "Hitung Prediksi"
+   - Dapatkan prediksi level air dan tingkat risiko
+
+3. **👁️ Verifikasi Visual (YOLO)**
+   - Upload gambar kondisi sungai/jalan
+   - Klik "Analisis Gambar"
+   - Lihat hasil deteksi visual kondisi banjir
+
+### 🔧 Prasyarat
+- Pastikan API Gateway berjalan di `http://localhost:8000`
+- Model LSTM dan YOLO sudah ter-load di backend
+- Koneksi internet stabil untuk request ke API
+
+### ⚡ Tips
+- Gunakan mode **wide** untuk tampilan optimal
+- Refresh halaman jika koneksi terputus
+- Cek sidebar untuk status koneksi real-time
+""")
+
+st.markdown("---")
+
+# System Status Overview
+if health['success']:
+    st.success("✅ **Sistem Siap Digunakan** - Semua komponen terhubung dengan baik")
+    
+    # Try to get system status
+    status = api_client.get_system_status()
+    if status['success']:
+        st.markdown("### 🎯 Status Komponen")
+        col1, col2, col3 = st.columns(3)
         
-        try:
-            payload = {"rainfall_mm": rain, "water_level_cm": water, "location_id": "MANGGARAI_01"}
-            start_ts = time.time()
-            response = requests.post(f"{API_URL}/predict", json=payload)
-            result = response.json()
-            latency = round((time.time() - start_ts) * 1000, 2)
+        status_data = status.get('data', {})
+        
+        with col1:
+            st.info("**API Gateway**  \n✓ Online")
+        with col2:
+            lstm_status = status_data.get('lstm_model', 'unknown')
+            st.info(f"**LSTM Model**  \n{'✓' if lstm_status == 'loaded' else '⚠'} {lstm_status.title()}")
+        with col3:
+            yolo_status = status_data.get('yolo_model', 'unknown')
+            st.info(f"**YOLO Model**  \n{'✓' if yolo_status == 'loaded' else '⚠'} {yolo_status.title()}")
+else:
+    error_message(
+        "API Gateway tidak dapat dijangkau",
+        f"Detail: {health.get('message', 'Unknown error')}\n\n"
+        "Pastikan backend API Gateway sudah berjalan di http://localhost:8000"
+    )
+    
+    st.markdown("""
+        ### 🔧 Troubleshooting
+        
+        1. Cek apakah API Gateway sudah berjalan:
+           ```bash
+           cd services/api_gateway/src
+           python main.py
+           ```
+        
+        2. Verifikasi port 8000 tidak digunakan aplikasi lain
+        
+        3. Cek log API Gateway untuk error messages
+    """)
 
-            with metrics_container:
-                m1, m2, m3, m4 = st.columns(4)
-                m1.metric("🌧️ Rainfall", f"{rain:.1f} mm")
-                m2.metric("🌊 TMA Saat Ini", f"{water:.0f} cm")
-                delta_color = "inverse" if result['risk_level'] == "BAHAYA" else "normal"
-                m3.metric("🔮 Prediksi TMA", f"{result['prediction_cm']:.0f} cm", 
-                         delta=f"{result['prediction_cm'] - water:.1f} cm", delta_color=delta_color)
-                m4.markdown(f"### Status: {result['risk_level']}")
-
-            if 'history' not in st.session_state:
-                st.session_state.history = {'time': [], 'actual': [], 'pred': []}
-            st.session_state.history['time'].append(pd.Timestamp.now())
-            st.session_state.history['actual'].append(water)
-            st.session_state.history['pred'].append(result['prediction_cm'])
-            
-            if len(st.session_state.history['time']) > 50:
-                for key in st.session_state.history: st.session_state.history[key].pop(0)
-            
-            fig = go.Figure()
-            fig.add_trace(go.Scatter(x=st.session_state.history['time'], y=st.session_state.history['actual'], name='Actual'))
-            fig.add_trace(go.Scatter(x=st.session_state.history['time'], y=st.session_state.history['pred'], name='Predicted', line=dict(dash='dot')))
-            fig.add_hline(y=150, line_dash="dash", line_color="red")
-            fig.update_layout(height=400, template="plotly_dark", margin=dict(l=20, r=20, t=40, b=20))
-            chart_container.plotly_chart(fig, use_container_width=True)
-            
-        except Exception as e:
-            st.warning(f"Waiting for API... ({str(e)})")
-
-    if mode == "Auto Simulation ⚡":
-        time.sleep(delay)
-        st.rerun()
-
-with tab2:
-    st.subheader("👁️ Visual Flood Verification")
-    uploaded_file = st.file_uploader("Upload CCTV Image", type=['jpg', 'png'])
-    if uploaded_file and st.button("Analyze Image"):
-        try:
-            files = {"file": uploaded_file.getvalue()}
-            res = requests.post(f"{API_URL}/verify-visual", files=files)
-            st.json(res.json())
-        except Exception as e:
-            st.error(f"Error: {e}")
+st.markdown("---")
+st.markdown("""
+    <div style="text-align: center; color: #6b7280; padding: 2rem 0;">
+        <p><strong>Jakarta FloodNet</strong> - AI-Powered Flood Monitoring System</p>
+        <p>© 2025 Jakarta FloodNet Team. All rights reserved.</p>
+    </div>
+""", unsafe_allow_html=True)
