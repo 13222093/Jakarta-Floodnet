@@ -1,135 +1,191 @@
 import sys
 import os
-import cv2
+import logging
 import numpy as np
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from pydantic import BaseModel
-from typing import Optional
+from typing import Optional, List
 
-# --- FIX PATH UNTUK LOCALHOST ---
-# Tambahkan current working directory ke path agar bisa import src.ml_core
-sys.path.append(os.getcwd())
+# --- LOGGING SETUP ---
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("JakartaFloodNet")
 
-# Imports dari Shared Library
-try:
-    from src.ml_core.lstm_model import FloodLevelLSTM
-    from src.ml_core.yolo_model import FloodVisualVerifier
-except ImportError as e:
-    print(f"❌ Import Error: {e}")
-    print("⚠️ Pastikan kamu menjalankan perintah dari ROOT FOLDER (Jakarta-Floodnet/)")
-    sys.exit(1)
+# --- PATH HACKS (Hackathon Standard Procedure) ---
+# Ensure we can import from src/ml_core regardless of where we run this
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../../..')))
+sys.path.append(os.getcwd()) # Extra safety for local run
 
-app = FastAPI(
-    title="Jakarta FloodNet API (Local)",
-    description="AI-Powered Early Warning System",
-    version="2.0.Local"
-)
+# --- APP INITIALIZATION ---
+app = FastAPI(title="Jakarta FloodNet API Gateway", version="1.0.0 (FINAL)")
 
-# ===== GLOBAL STATE =====
-lstm_service: Optional[FloodLevelLSTM] = None
-yolo_service: Optional[FloodVisualVerifier] = None
+# --- GLOBAL STATE (GOD MODE) ---
+class DemoState:
+    active: bool = False
+    scenario: str = "CRITICAL"
 
-# ===== CONFIG PATHS (Local Default) =====
-# Menggunakan folder lokal ./models
+demo_state = DemoState()
+
+# --- MODEL LOADING (REAL AI) ---
+lstm_model = None
+
+# CONFIG: Updated Paths based on your fix
 MODEL_DIR = os.getenv("MODEL_PATH", "models")
-LSTM_PATH = os.path.join(MODEL_DIR, "best_model_modular.h5")
+LSTM_MODEL_PATH = os.path.join(MODEL_DIR, "lstm_flood_forecaster.h5")
+LSTM_SCALER_BASE_PATH = os.path.join(MODEL_DIR, "lstm") # Will resolve to _scaler_X.pkl internally
 YOLO_PATH = os.getenv("YOLO_PATH", "models/yolov8n.pt")
 
-@app.on_event("startup")
-async def load_models():
-    """Load models saat server nyala"""
-    global lstm_service, yolo_service
-    print(f"🚀 API Starting on Localhost... Model Dir: {MODEL_DIR}")
+# Load YOLO Service (Preserving existing logic)
+yolo_service = None
 
-    # 1. Load LSTM
-    try:
-        lstm_service = FloodLevelLSTM()
-        if os.path.exists(LSTM_PATH):
-            success = lstm_service.load_model(LSTM_PATH)
-            if success:
-                print(f"✅ LSTM Model loaded: {LSTM_PATH}")
-            else:
-                print("⚠️ LSTM load failed internally.")
+try:
+    # Attempt to load the Real AI
+    from src.ml_core.lstm_model import FloodLevelLSTM
+    from src.ml_core.yolo_model import FloodVisualVerifier
+    
+    logger.info(f"Loading LSTM from {LSTM_MODEL_PATH}...")
+    lstm_model = FloodLevelLSTM()
+    if os.path.exists(LSTM_MODEL_PATH):
+        success = lstm_model.load_model(LSTM_MODEL_PATH, LSTM_SCALER_BASE_PATH)
+        if success:
+            logger.info("✅ REAL AI LOADED: LSTM Neural Network Active.")
         else:
-            print(f"⚠️ LSTM Model not found at {LSTM_PATH}. Run training first!")
-    except Exception as e:
-        print(f"❌ LSTM Error: {e}")
+            logger.error("❌ LSTM Load returned False.")
+            lstm_model = None
+    else:
+        logger.warning(f"⚠️ LSTM Model file not found at {LSTM_MODEL_PATH}")
 
-    # 2. Load YOLO
+    # Load YOLO
     try:
-        # Pastikan folder models ada untuk download yolo
         os.makedirs(MODEL_DIR, exist_ok=True)
         yolo_service = FloodVisualVerifier(model_path=YOLO_PATH)
         yolo_service.load_model()
-        print(f"✅ YOLO Service ready")
+        logger.info("✅ YOLO Service ready")
     except Exception as e:
-        print(f"❌ YOLO Error: {e}")
+        logger.error(f"❌ YOLO Error: {e}")
 
-# ===== DATA MODELS & ENDPOINTS =====
+except Exception as e:
+    logger.error(f"⚠️ MODEL LOAD FAILED: {e}")
+    logger.warning("System running in API-Only mode (Real AI unavailable).")
 
-class FloodPredictionInput(BaseModel):
-    rainfall_mm: float
+
+# --- DATA MODELS ---
+class PredictionRequest(BaseModel):
     water_level_cm: float
-    
-class PredictionResponse(BaseModel):
-    status: str
-    prediction_cm: float
-    risk_level: str
-    alert_message: str
+    rainfall_mm: float
+
+# --- ENDPOINTS ---
 
 @app.get("/")
 def root():
-    return {"message": "Jakarta FloodNet API (Localhost) 🟢"}
+    return {"message": "Jakarta FloodNet API (Final Production) 🟢"}
 
 @app.get("/health")
 def health_check():
     return {
         "status": "active",
+        "mode": "DEMO" if demo_state.active else "LIVE",
         "models": {
-            "lstm_ready": lstm_service.is_trained if lstm_service else False,
-            "yolo_ready": yolo_service.is_loaded if yolo_service else False
+            "lstm_ready": lstm_model is not None and lstm_model.is_trained,
+            "vision_ready": yolo_service is not None
         }
     }
 
-@app.post("/predict", response_model=PredictionResponse)
-async def predict_flood(data: FloodPredictionInput):
-    if not lstm_service or not lstm_service.is_trained:
-        # Fallback Logic
-        dummy_pred = data.water_level_cm + (data.rainfall_mm * 0.5)
+# 1. GOD MODE TOGGLE
+@app.post("/admin/set-demo-mode")
+async def set_demo_mode(request: dict):
+    """
+    MASTER SWITCH for Pitch Demo.
+    Accepts {"enable": true, "scenario": "CRITICAL"}
+    """
+    enable = request.get("enable", False)
+    scenario = request.get("scenario", "CRITICAL")
+    
+    demo_state.active = enable
+    demo_state.scenario = scenario
+    logger.info(f"🚨 DEMO MODE CHANGED: {enable} ({scenario})")
+    return {
+        "status": "success", 
+        "mode": "DEMO" if enable else "LIVE", 
+        "scenario": scenario
+    }
+
+@app.get("/admin/demo-status")
+async def get_demo_status():
+    return {
+        "demo_mode_enabled": demo_state.active,
+        "scenario": demo_state.scenario
+    }
+
+# 2. HYBRID PREDICTION ENGINE (Physics/AI + God Mode)
+@app.post("/predict")
+async def predict_flood_risk(data: PredictionRequest):
+    # A. INTERCEPT: GOD MODE
+    if demo_state.active:
+        logger.info("⚡ GOD MODE TRIGGERED: Returning CRITICAL prediction.")
         return {
-            "status": "fallback_mode",
-            "prediction_cm": round(dummy_pred, 1),
-            "risk_level": "UNKNOWN",
-            "alert_message": "Model belum siap/dilatih."
+            "status": "demo_mode_active",
+            "prediction_cm": 250.0,
+            "risk_level": "CRITICAL",
+            "alert_message": "🚨 SIAGA 1 - EVAKUASI SEGERA! Ketinggian air mencapai level kritis.",
+            "timestamp": "2025-11-25T10:00:00Z"
         }
 
-    try:
-        features = np.array([[data.rainfall_mm, data.rainfall_mm, data.water_level_cm]])
-        pred_array = lstm_service.predict(features)
-        pred_cm = float(pred_array[0])
-        
-        risk = "AMAN"
-        msg = "Kondisi normal."
-        if pred_cm > 150:
-            risk = "BAHAYA"
-            msg = "⚠️ POTENSI BANJIR! Segera evakuasi."
-        elif pred_cm > 100:
-            risk = "SIAGA"
-            msg = "Waspada kenaikan muka air."
+    # B. REAL AI LOGIC
+    if lstm_model and lstm_model.is_trained:
+        try:
+            # Prediction logic - Adapted for FloodLevelLSTM
+            # Input shape: (1, 3) -> [rain, rain, water]
+            features = np.array([[data.rainfall_mm, data.rainfall_mm, data.water_level_cm]])
+            prediction_array = lstm_model.predict(features)
+            prediction = float(prediction_array[0])
             
-        return {
-            "status": "success",
-            "prediction_cm": round(pred_cm, 2),
-            "risk_level": risk,
-            "alert_message": msg
-        }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+            # Risk Logic
+            risk = "AMAN"
+            if prediction > 150: risk = "BAHAYA" # >150 is Danger
+            elif prediction > 100: risk = "SIAGA" # >100 is Warning
+            
+            msg = f"Status: {risk}. Ketinggian diprediksi {round(prediction, 1)} cm."
+            if risk == "BAHAYA":
+                msg = "⚠️ POTENSI BANJIR! Segera evakuasi."
+            
+            return {
+                "status": "success",
+                "prediction_cm": round(prediction, 2),
+                "risk_level": risk,
+                "alert_message": msg
+            }
+        except Exception as e:
+            logger.error(f"Inference Error: {e}")
+            # Fallback if Real AI crashes mid-request
+            return {"status": "error", "message": "Computation Error", "prediction_cm": data.water_level_cm}
+    
+    # Fallback if model not loaded
+    dummy_pred = data.water_level_cm + (data.rainfall_mm * 0.5)
+    return {
+        "status": "fallback_mode",
+        "prediction_cm": round(dummy_pred, 1),
+        "risk_level": "UNKNOWN",
+        "alert_message": "Model belum siap/dilatih."
+    }
 
+# 3. VISUAL VERIFICATION (YOLO + God Mode)
 @app.post("/verify-visual")
 async def verify_visual(file: UploadFile = File(...)):
+    # A. INTERCEPT: GOD MODE
+    if demo_state.active:
+        logger.info("⚡ GOD MODE TRIGGERED: Returning SUSTAINABILITY proof.")
+        return {
+            "is_flooded": True,
+            "flood_probability": 0.99,
+            "objects_detected": ["flood", "water", "trash_buildup", "plastic_waste"], 
+            "trash_severity": "HIGH",
+            "timestamp": "2025-11-25T10:00:00Z"
+        }
+
+    # B. REAL LOGIC
     if not yolo_service:
-        raise HTTPException(status_code=503, detail="Visual service not available")
+         return {"status": "error", "message": "Visual service not available"}
+         
     try:
         contents = await file.read()
         nparr = np.frombuffer(contents, np.uint8)
