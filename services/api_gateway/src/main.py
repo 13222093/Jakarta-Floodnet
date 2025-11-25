@@ -177,8 +177,7 @@ async def verify_visual(file: UploadFile = File(...)):
         return {
             "is_flooded": True,
             "flood_probability": 0.99,
-            "objects_detected": ["flood", "water", "trash_buildup", "plastic_waste"], 
-            "trash_severity": "HIGH",
+            "objects_detected": ["flood", "water"], 
             "timestamp": "2025-11-25T10:00:00Z"
         }
 
