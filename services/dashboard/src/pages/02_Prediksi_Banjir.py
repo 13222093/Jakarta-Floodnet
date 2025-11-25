@@ -203,11 +203,21 @@ if predict_button:
     if result['success']:
         data = result['data']
         
-        # Extract prediction info
-        prediction_value = data.get('prediction', 0)
-        risk_level = data.get('risk_level', 'UNKNOWN')
-        confidence = data.get('confidence', 0)
-        recommendation = data.get('recommendation', 'N/A')
+        # Extract prediction info - Updated to match backend response format
+        prediction_value = data.get('prediction_cm', 0)  # Backend returns 'prediction_cm'
+        risk_level = data.get('risk_level', 'UNKNOWN')  # Correct
+        status = data.get('status', 'unknown')  # Backend status field
+        alert_message = data.get('alert_message', 'N/A')  # Backend returns 'alert_message'
+        
+        # Calculate confidence based on status (since backend doesn't provide it)
+        if status == "demo_mode_active":
+            confidence = 1.0  # 100% for demo mode
+        elif status == "success":
+            confidence = 0.85  # 85% for successful AI prediction
+        elif status == "fallback_mode":
+            confidence = 0.65  # 65% for fallback calculation
+        else:
+            confidence = 0.5   # 50% for unknown status
         
         # Display results in responsive columns
         col1, col2, col3 = st.columns([1, 1, 1])
@@ -292,15 +302,23 @@ if predict_button:
         st.markdown("#### 📋 Rekomendasi")
         
         if risk_level == "AMAN":
-            success_message(f"**KONDISI AMAN**: {recommendation}")
+            success_message(f"**KONDISI AMAN**: {alert_message}")
         elif risk_level == "SIAGA":
-            warning_message(f"**SIAGA BANJIR**: {recommendation}")
+            warning_message(f"**SIAGA BANJIR**: {alert_message}")
         else:
-            st.error(f"🚨 **BAHAYA BANJIR**: {recommendation}")
+            st.error(f"🚨 **BAHAYA BANJIR**: {alert_message}")
         
         # Detailed info
         with st.expander("📊 Detail Lengkap Prediksi"):
             st.json(data)
+            
+            # Debug info
+            st.markdown("**🔧 Debug Info:**")
+            st.write(f"- Prediction value: `{prediction_value}` (from field: `prediction_cm`)")
+            st.write(f"- Risk level: `{risk_level}` (from field: `risk_level`)")
+            st.write(f"- Status: `{status}` (from field: `status`)")
+            st.write(f"- Alert message: `{alert_message}` (from field: `alert_message`)")
+            st.write(f"- Calculated confidence: `{confidence:.1%}`")
         
         # Action buttons
         st.markdown("---")

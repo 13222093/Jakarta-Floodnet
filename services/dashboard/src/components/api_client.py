@@ -64,7 +64,7 @@ class APIClient:
                 'message': f'Error: {str(e)}'
             }
     
-    def get_prediction(self, data: Dict[str, float]) -> Dict[str, Any]:
+    def get_prediction(self, data: Dict[str, Any]) -> Dict[str, Any]:
         """
         Mendapatkan prediksi level air dari LSTM model
         
@@ -87,10 +87,29 @@ class APIClient:
                         'message': f'Field {field} diperlukan'
                     }
             
+            # Convert frontend field names to backend expected format
+            # Backend expects: water_level_cm, rainfall_mm
+            # Frontend sends: hujan_bogor, hujan_jakarta, current_water_level
+            
+            # Use Jakarta rainfall as primary rainfall value
+            rainfall_mm = float(data['hujan_jakarta'])
+            
+            # Use current_water_level if provided, otherwise default to 100.0
+            water_level_cm = float(data.get('current_water_level', 100.0))
+            
+            # Backend expected payload format
+            payload = {
+                'rainfall_mm': rainfall_mm,
+                'water_level_cm': water_level_cm
+            }
+            
+            logger.info(f"Sending prediction request with payload: {payload}")
+            logger.info(f"Original frontend data: {data}")
+            
             # Kirim POST request ke endpoint prediksi
             response = requests.post(
                 f"{self.base_url}/predict",
-                json=data,
+                json=payload,
                 timeout=self.timeout
             )
             response.raise_for_status()
@@ -122,21 +141,41 @@ class APIClient:
                 'message': f'Error: {str(e)}'
             }
     
-    def verify_image(self, image_file) -> Dict[str, Any]:
+    def verify_image(self, image_file, filename: str = "image.jpg") -> Dict[str, Any]:
         """
         Verifikasi visual kondisi banjir menggunakan YOLO model
         
         Args:
-            image_file: File gambar yang akan dianalisis
+            image_file: File gambar yang akan dianalisis (bytes atau file-like object)
+            filename: Nama file (default: "image.jpg")
         
         Returns:
             Dictionary dengan hasil verifikasi visual
         """
         try:
-            # Prepare file untuk upload
+            # Detect file type based on filename or default to jpeg
+            if filename.lower().endswith('.png'):
+                mime_type = 'image/png'
+            elif filename.lower().endswith('.jpg') or filename.lower().endswith('.jpeg'):
+                mime_type = 'image/jpeg'
+            elif filename.lower().endswith('.gif'):
+                mime_type = 'image/gif'
+            else:
+                mime_type = 'image/jpeg'  # default
+            
+            # Prepare file untuk upload dengan format yang benar
+            if hasattr(image_file, 'read'):
+                # File-like object
+                file_content = image_file.read()
+            else:
+                # Bytes
+                file_content = image_file
+            
             files = {
-                'file': ('image.jpg', image_file, 'image/jpeg')
+                'file': (filename, file_content, mime_type)
             }
+            
+            logger.info(f"Sending image verification request for file: {filename}")
             
             # Kirim POST request dengan file gambar
             response = requests.post(
@@ -162,9 +201,15 @@ class APIClient:
             }
         except requests.exceptions.HTTPError as e:
             logger.error(f"HTTP error in verify_image: {e}")
+            error_detail = ""
+            try:
+                if e.response.text:
+                    error_detail = f" - {e.response.text}"
+            except:
+                pass
             return {
                 'success': False,
-                'message': f'Server error: {e.response.status_code}'
+                'message': f'Server error: {e.response.status_code}{error_detail}'
             }
         except Exception as e:
             logger.error(f"Unexpected error in verify_image: {str(e)}")
@@ -172,6 +217,12 @@ class APIClient:
                 'success': False,
                 'message': f'Error: {str(e)}'
             }
+    
+    def verify_visual(self, image_file, filename: str = "image.jpg") -> Dict[str, Any]:
+        """
+        Alias untuk verify_image untuk konsistensi dengan backend API
+        """
+        return self.verify_image(image_file, filename)
     
     def get_history(self, limit: int = 100) -> Dict[str, Any]:
         """
