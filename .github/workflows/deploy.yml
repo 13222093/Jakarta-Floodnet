@@ -1,0 +1,31 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [ "main" ]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy to DigitalOcean
+        uses: appleboy/ssh-action@v0.1.10
+        with:
+          host: ${{ secrets.HOST }}
+          username: ${{ secrets.USERNAME }}
+          key: ${{ secrets.SSH_KEY }}
+          script: |
+            cd ~/Jakarta-Floodnet
+            
+            # 1. Ambil update Code + Model terbaru
+            git pull origin main
+            
+            # 2. Update library (kali aja ada pip baru)
+            source venv/bin/activate
+            pip install -r requirements.txt
+            
+            # 3. Restart Service (Ini akan me-reload model baru ke RAM)
+            sudo systemctl restart floodnet-api
+            sudo systemctl restart floodnet-dashboard
+            
+            echo "Deployment & Model Update Success!"
