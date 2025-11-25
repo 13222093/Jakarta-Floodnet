@@ -147,14 +147,20 @@ def metric_card(label: str, value: str, delta: Optional[str] = None,
 
 def error_message(message: str, details: Optional[str] = None):
     """
-    Menampilkan pesan error dengan styling konsisten
+    Menampilkan pesan error dengan styling konsistent
     
     Args:
         message: Pesan error utama
         details: Detail tambahan (optional)
     """
     error_icon = render_icon('x-circle', size=20, color="#ffffff")
-    st.error(f"{error_icon} {message}", icon_color=COLORS['error'])
+    st.markdown(f"""
+        <div style="background: {COLORS['error']}15; border-left: 4px solid {COLORS['error']}; padding: 1rem; border-radius: 4px; margin: 1rem 0;">
+            <div style="display: flex; align-items: center; gap: 0.5rem; color: {COLORS['error']};">
+                {error_icon} <strong>{message}</strong>
+            </div>
+        </div>
+    """, unsafe_allow_html=True)
     if details:
         with st.expander("Detail Error"):
             st.code(details)
