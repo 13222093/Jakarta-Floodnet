@@ -21,7 +21,7 @@ jobs:
             git pull origin main
             
             # 2. Update library (kali aja ada pip baru)
-            source venv/bin/activate
+            source .venv/bin/activate
             pip install -r requirements.txt
             
             # 3. Restart Service (Ini akan me-reload model baru ke RAM)
