@@ -1,6 +1,32 @@
 """
 UI Widgets dan Komponen Reusable
 Jakarta FloodNet Dashboard
+
+EMOJI TO LUCIDE ICON MAPPING:
+==============================
+Kategori Status:
+- 🌊 (Banjir/Air)     -> 'waves'
+- 🌧️ (Hujan)          -> 'cloud-rain'  
+- ✅ (Aman/Sukses)     -> 'shield-check'
+- ⚠️ (Bahaya/Warning)  -> 'triangle-alert'
+- 🚨 (Darurat/Sirine)  -> 'siren'
+- ❌ (Error)           -> 'x-circle'
+- ℹ️ (Info)           -> 'info'
+
+Kategori UI/Navigasi:
+- 🏠 (Home)           -> 'layout-dashboard'
+- 🤖 (AI/Model)       -> 'brain-circuit'
+- 📷 (Kamera/Visual)  -> 'camera' atau 'scan-eye'  
+- 📈 (Grafik/Tren)    -> 'activity'
+- 📊 (Dashboard)      -> 'activity' atau 'bar-chart-3'
+- 🔮 (Prediksi)       -> 'brain-circuit'
+- 👁️ (Mata/Visual)    -> 'scan-eye'
+- 🟢 (Connected)      -> 'wifi'
+- 🔴 (Disconnected)   -> 'wifi-off'
+- ⏱️ (Timer/Waktu)    -> 'timer'
+
+Usage:
+render_icon('waves', size=24, color='#3b82f6', margin_right=8)
 """
 
 import streamlit as st
@@ -19,7 +45,57 @@ COLORS = {
     'error': '#dc2626'      # Dark Red
 }
 
-def status_card(title: str, value: str, status: str = 'info', icon: str = "📊"):
+def render_icon(icon_name: str, size: int = 24, color: Optional[str] = None, 
+                margin_right: int = 8) -> str:
+    """
+    Merender Lucide Icon tanpa library tambahan via CDN.
+    
+    Args:
+        icon_name: Nama icon Lucide (contoh: 'waves', 'triangle-alert')
+        size: Ukuran icon dalam pixel (default: 24)
+        color: Warna hex (opsional, default mengikuti tema)
+        margin_right: Margin kanan dalam pixel (default: 8)
+    
+    Returns:
+        HTML string untuk icon SVG
+    
+    Note:
+        Menggunakan CDN jsdelivr untuk load icon SVG.
+        Untuk mengubah warna, gunakan CSS filter.
+    """
+    url = f"https://cdn.jsdelivr.net/npm/lucide-static@0.344.0/icons/{icon_name}.svg"
+    
+    # CSS Style untuk adjustment
+    style_parts = [
+        f"width:{size}px",
+        f"height:{size}px", 
+        f"margin-right:{margin_right}px",
+        "vertical-align:middle"
+    ]
+    
+    # Add color filter if specified
+    if color:
+        # Convert hex to filter for SVG colorization
+        if color.startswith('#'):
+            # Basic filter mapping for common colors
+            color_filters = {
+                '#ffffff': 'invert(1)',  # White
+                '#000000': 'invert(0)',  # Black
+                '#ef4444': 'invert(17%) sepia(93%) saturate(7471%) hue-rotate(356deg) brightness(91%) contrast(134%)',  # Red
+                '#f59e0b': 'invert(64%) sepia(88%) saturate(2231%) hue-rotate(2deg) brightness(105%) contrast(101%)',  # Yellow
+                '#10b981': 'invert(64%) sepia(42%) saturate(1352%) hue-rotate(127deg) brightness(95%) contrast(80%)',   # Green
+                '#3b82f6': 'invert(45%) sepia(62%) saturate(2865%) hue-rotate(213deg) brightness(103%) contrast(101%)'  # Blue
+            }
+            filter_value = color_filters.get(color, 'none')
+            if filter_value != 'none':
+                style_parts.append(f"filter:{filter_value}")
+    
+    style = "; ".join(style_parts)
+    
+    # Render HTML Image
+    return f'<img src="{url}" style="{style}" alt="{icon_name}-icon">'
+
+def status_card(title: str, value: str, status: str = 'info', icon_name: str = "activity"):
     """
     Menampilkan kartu status dengan warna sesuai tingkat bahaya
     
@@ -27,9 +103,10 @@ def status_card(title: str, value: str, status: str = 'info', icon: str = "📊"
         title: Judul kartu
         value: Nilai yang ditampilkan
         status: Tipe status ('safe', 'warning', 'danger', 'info')
-        icon: Emoji icon
+        icon_name: Nama Lucide icon (contoh: 'activity', 'waves', 'triangle-alert')
     """
     color = COLORS.get(status, COLORS['info'])
+    icon_html = render_icon(icon_name, size=32, color=color)
     
     st.markdown(f"""
         <div style="
@@ -40,7 +117,7 @@ def status_card(title: str, value: str, status: str = 'info', icon: str = "📊"
             margin: 0.5rem 0;
         ">
             <div style="display: flex; align-items: center; gap: 1rem;">
-                <span style="font-size: 2rem;">{icon}</span>
+                <span>{icon_html}</span>
                 <div>
                     <div style="font-size: 0.875rem; color: #6b7280; margin-bottom: 0.25rem;">
                         {title}
@@ -76,7 +153,8 @@ def error_message(message: str, details: Optional[str] = None):
         message: Pesan error utama
         details: Detail tambahan (optional)
     """
-    st.error(f"❌ {message}")
+    error_icon = render_icon('x-circle', size=20, color="#ffffff")
+    st.error(f"{error_icon} {message}", icon_color=COLORS['error'])
     if details:
         with st.expander("Detail Error"):
             st.code(details)
@@ -84,17 +162,38 @@ def error_message(message: str, details: Optional[str] = None):
 
 def success_message(message: str):
     """Menampilkan pesan sukses"""
-    st.success(f"✅ {message}")
+    success_icon = render_icon('shield-check', size=20, color="#ffffff")
+    st.markdown(f"""
+        <div style="background: {COLORS['success']}15; border-left: 4px solid {COLORS['success']}; padding: 1rem; border-radius: 4px; margin: 1rem 0;">
+            <div style="display: flex; align-items: center; gap: 0.5rem; color: {COLORS['success']};">
+                {success_icon} <strong>{message}</strong>
+            </div>
+        </div>
+    """, unsafe_allow_html=True)
 
 
 def warning_message(message: str):
     """Menampilkan pesan warning"""
-    st.warning(f"⚠️ {message}")
+    warning_icon = render_icon('triangle-alert', size=20, color="#ffffff")
+    st.markdown(f"""
+        <div style="background: {COLORS['warning']}15; border-left: 4px solid {COLORS['warning']}; padding: 1rem; border-radius: 4px; margin: 1rem 0;">
+            <div style="display: flex; align-items: center; gap: 0.5rem; color: {COLORS['warning']};">
+                {warning_icon} <strong>{message}</strong>
+            </div>
+        </div>
+    """, unsafe_allow_html=True)
 
 
 def info_message(message: str):
     """Menampilkan pesan info"""
-    st.info(f"ℹ️ {message}")
+    info_icon = render_icon('info', size=20, color="#ffffff")
+    st.markdown(f"""
+        <div style="background: {COLORS['info']}15; border-left: 4px solid {COLORS['info']}; padding: 1rem; border-radius: 4px; margin: 1rem 0;">
+            <div style="display: flex; align-items: center; gap: 0.5rem; color: {COLORS['info']};">
+                {info_icon} <strong>{message}</strong>
+            </div>
+        </div>
+    """, unsafe_allow_html=True)
 
 
 def connection_status_badge(is_connected: bool):
@@ -105,7 +204,8 @@ def connection_status_badge(is_connected: bool):
         is_connected: Status koneksi (True/False)
     """
     if is_connected:
-        st.markdown("""
+        connected_icon = render_icon('wifi', size=16, color='#10b981')
+        st.markdown(f"""
             <div style="
                 display: inline-block;
                 background-color: #10b98120;
@@ -115,11 +215,12 @@ def connection_status_badge(is_connected: bool):
                 font-size: 0.875rem;
                 font-weight: 600;
             ">
-                🟢 API Terhubung
+                {connected_icon} API Terhubung
             </div>
         """, unsafe_allow_html=True)
     else:
-        st.markdown("""
+        disconnected_icon = render_icon('wifi-off', size=16, color='#ef4444')
+        st.markdown(f"""
             <div style="
                 display: inline-block;
                 background-color: #ef444420;
@@ -129,7 +230,7 @@ def connection_status_badge(is_connected: bool):
                 font-size: 0.875rem;
                 font-weight: 600;
             ">
-                🔴 API Terputus
+                {disconnected_icon} API Terputus
             </div>
         """, unsafe_allow_html=True)
 
@@ -148,15 +249,15 @@ def flood_level_indicator(water_level: float, threshold_siaga: float = 150.0,
     if water_level < threshold_siaga:
         status = 'safe'
         status_text = 'AMAN'
-        icon = '✅'
+        icon_html = render_icon('shield-check', size=48, color=COLORS['safe'])
     elif water_level < threshold_bahaya:
         status = 'warning'
         status_text = 'SIAGA'
-        icon = '⚠️'
+        icon_html = render_icon('triangle-alert', size=48, color=COLORS['warning'])
     else:
         status = 'danger'
         status_text = 'BAHAYA'
-        icon = '🚨'
+        icon_html = render_icon('siren', size=48, color=COLORS['danger'])
     
     color = COLORS[status]
     
@@ -172,7 +273,7 @@ def flood_level_indicator(water_level: float, threshold_siaga: float = 150.0,
             margin: 1rem 0;
         ">
             <div style="text-align: center; margin-bottom: 1rem;">
-                <span style="font-size: 3rem;">{icon}</span>
+                <div style="margin-bottom: 0.5rem;">{icon_html}</div>
                 <div style="font-size: 1.5rem; font-weight: 700; color: {color}; margin-top: 0.5rem;">
                     {status_text}
                 </div>
@@ -190,7 +291,7 @@ def flood_level_indicator(water_level: float, threshold_siaga: float = 150.0,
                     transition: width 0.3s ease;
                 "></div>
             </div>
-            <div style="text-align: center; margin-top: 1rem; font-size: 1.25rem; font-weight: 600;">
+            <div style="text-align: center; margin-top: 1rem; font-size: 1.25rem; font-weight: 600; color: {color}">
                 {water_level:.1f} cm
             </div>
         </div>
@@ -273,29 +374,38 @@ def loading_spinner(message: str = "Memproses..."):
 def sidebar_info():
     """Informasi sidebar standar"""
     st.sidebar.markdown("---")
-    st.sidebar.markdown("""
-        ### 🌊 Jakarta FloodNet
+    
+    # Generate icons for sidebar
+    waves_icon = render_icon('waves', size=20, color='#3b82f6')
+    brain_icon = render_icon('brain-circuit', size=16, color='#ffffff')
+    eye_icon = render_icon('scan-eye', size=16, color='#ffffff')
+    chart_icon = render_icon('activity', size=16, color='#ffffff')
+    
+    st.sidebar.markdown(f"""
+        ### {waves_icon} Jakarta FloodNet
         **Sistem Monitoring Banjir AI**
         
         #### Fitur:
-        - 🔮 Prediksi LSTM
-        - 👁️ Verifikasi Visual YOLO
-        - 📊 Real-time Monitoring
+        - {brain_icon} Prediksi LSTM
+        - {eye_icon} Verifikasi Visual YOLO
+        - {chart_icon} Real-time Monitoring
         
         ---
         *Powered by AI & ML*
-    """)
+    """, unsafe_allow_html=True)
 
 
-def page_header(title: str, subtitle: str = "", icon: str = "🌊"):
+def page_header(title: str, subtitle: str = "", icon_name: str = "waves"):
     """
     Header standar untuk setiap halaman
     
     Args:
         title: Judul halaman
         subtitle: Subtitle (optional)
-        icon: Icon emoji
+        icon_name: Nama Lucide icon (default: 'waves')
     """
+    header_icon = render_icon(icon_name, size=40, color='#ffffff')
+    
     st.markdown(f"""
         <div style="
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
@@ -304,8 +414,8 @@ def page_header(title: str, subtitle: str = "", icon: str = "🌊"):
             margin-bottom: 2rem;
             color: white;
         ">
-            <h1 style="margin: 0; font-size: 2.5rem;">
-                {icon} {title}
+            <h1 style="margin: 0; font-size: 2.5rem; display: flex; align-items: center; gap: 1rem;">
+                {header_icon} {title}
             </h1>
             {f'<p style="margin: 0.5rem 0 0 0; font-size: 1.125rem; opacity: 0.9;">{subtitle}</p>' if subtitle else ''}
         </div>

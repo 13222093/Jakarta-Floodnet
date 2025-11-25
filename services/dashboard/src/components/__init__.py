@@ -19,6 +19,7 @@ from .ui_widgets import (
     page_header,
     format_timestamp,
     inject_responsive_css,
+    render_icon,
     COLORS
 )
 
