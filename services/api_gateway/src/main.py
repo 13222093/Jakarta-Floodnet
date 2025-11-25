@@ -5,6 +5,10 @@ import numpy as np
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from pydantic import BaseModel
 from typing import Optional, List
+try:
+    from scenarios import get_scenario, list_scenarios
+except ImportError:
+    from services.api_gateway.src.scenarios import get_scenario, list_scenarios
 
 # --- LOGGING SETUP ---
 logging.basicConfig(level=logging.INFO)
@@ -194,6 +198,76 @@ async def verify_visual(file: UploadFile = File(...)):
         return yolo_service.detect_flood_features(img)
     except Exception as e:
         return {"status": "error", "message": str(e)}
+
+# 4. SCENARIO SYSTEM (One-Click Demo)
+@app.get("/scenarios")
+def get_available_scenarios():
+    """List all scenarios for Frontend Dropdown"""
+    return list_scenarios()
+
+@app.post("/predict/scenario/{scenario_id}")
+async def predict_scenario(scenario_id: str):
+    """
+    Run a specific demo scenario.
+    - If God Mode is enabled in scenario -> Force CRITICAL
+    - If Normal -> Feed scenario data into Real AI
+    """
+    scenario = get_scenario(scenario_id)
+    if not scenario:
+        raise HTTPException(status_code=404, detail="Scenario not found")
+    
+    # A. SCENARIO GOD MODE
+    if scenario["god_mode_enabled"]:
+        logger.info(f"⚡ SCENARIO GOD MODE: {scenario['name']}")
+        return {
+            "status": "demo_mode_active",
+            "prediction_cm": 250.0,
+            "risk_level": "CRITICAL",
+            "alert_message": "🚨 SIAGA 1 - EVAKUASI SEGERA! Ketinggian air mencapai level kritis.",
+            "timestamp": "2025-11-25T10:00:00Z"
+        }
+
+    # B. REAL AI WITH SCENARIO DATA
+    data = scenario["data"]
+    rainfall = data["rainfall_mm"]
+    water_level = data["water_level_cm"]
+    
+    if lstm_model and lstm_model.is_trained:
+        try:
+            # Input shape: (1, 3) -> [rain, rain, water]
+            features = np.array([[rainfall, rainfall, water_level]])
+            prediction_array = lstm_model.predict(features)
+            prediction = float(prediction_array[0])
+            
+            # Risk Logic
+            risk = "AMAN"
+            if prediction > 150: risk = "BAHAYA"
+            elif prediction > 100: risk = "SIAGA"
+            
+            msg = f"Status: {risk}. Ketinggian diprediksi {round(prediction, 1)} cm."
+            if risk == "BAHAYA":
+                msg = "⚠️ POTENSI BANJIR! Segera evakuasi."
+            
+            return {
+                "status": "success",
+                "prediction_cm": round(prediction, 2),
+                "risk_level": risk,
+                "alert_message": msg,
+                "scenario_used": scenario["name"]
+            }
+        except Exception as e:
+            logger.error(f"Scenario Inference Error: {e}")
+            return {"status": "error", "message": "Computation Error"}
+
+    # Fallback
+    dummy_pred = water_level + (rainfall * 0.5)
+    return {
+        "status": "fallback_mode",
+        "prediction_cm": round(dummy_pred, 1),
+        "risk_level": "UNKNOWN",
+        "alert_message": "Model belum siap/dilatih.",
+        "scenario_used": scenario["name"]
+    }
 
 if __name__ == "__main__":
     import uvicorn
