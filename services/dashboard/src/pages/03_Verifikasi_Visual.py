@@ -26,6 +26,7 @@ from components import (
     loading_spinner,
     sidebar_info,
     inject_responsive_css,
+    render_icon,
     COLORS
 )
 
@@ -57,7 +58,7 @@ with st.sidebar:
 page_header(
     "Verifikasi Visual (YOLO)",
     "Analisis Gambar Kondisi Banjir Menggunakan Computer Vision",
-    "👁️"
+    "eye"
 )
 
 # Check API connection

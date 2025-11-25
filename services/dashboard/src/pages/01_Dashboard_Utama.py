@@ -26,13 +26,14 @@ from components import (
     warning_message,
     sidebar_info,
     inject_responsive_css,
+    render_icon,
     COLORS
 )
 
 # ==================== PAGE SETUP ====================
 st.set_page_config(
     page_title="Dashboard Utama - Jakarta FloodNet",
-    page_icon="📊",
+    page_icon="📊",  # Keep as emoji for browser tab
     layout="wide",
     initial_sidebar_state="auto"
 )
@@ -46,7 +47,7 @@ with st.sidebar:
     
     # Connection status
     st.markdown("---")
-    st.markdown("#### 🔌 Status Koneksi")
+    st.markdown(f"#### {render_icon('wifi', size=20, color='#ffffff')} Status Koneksi", unsafe_allow_html=True)
     health = api_client.check_health()
     connection_status_badge(health['success'])
 
@@ -54,7 +55,7 @@ with st.sidebar:
 page_header(
     "Dashboard Utama",
     "Monitoring Status Real-time Sistem Jakarta FloodNet",
-    "📊"
+    'layout-dashboard'
 )
 
 # Auto-refresh toggle
@@ -66,7 +67,7 @@ if auto_refresh:
     st.info("⏱️ Auto refresh aktif - halaman akan di-refresh setiap 30 detik")
 
 # ==================== STATUS OVERVIEW ====================
-st.markdown("### 🎯 Status Sistem")
+st.markdown(f"### {render_icon('target', size=24, color = '#ffffff')} Status Sistem", unsafe_allow_html=True)
 
 if not health['success']:
     error_message(
@@ -139,7 +140,7 @@ if system_status['success']:
 st.markdown("---")
 
 # ==================== MONITORING DATA ====================
-st.markdown("### 📈 Data Monitoring")
+st.markdown(f"### {render_icon('activity', size=24, color = '#ffffff')} Data Monitoring", unsafe_allow_html=True)
 
 # Generate dummy data untuk demo
 # Dalam implementasi nyata, ambil dari API history
@@ -197,18 +198,18 @@ use_mobile_layout = st.session_state.get('mobile_view', False)
 
 if use_mobile_layout:
     # Mobile: Stack vertically
-    st.markdown("#### 🌊 Status Banjir")
+    st.markdown(f"#### {render_icon('waves', size=20, color='#ffffff')} Status Banjir", unsafe_allow_html=True)
     flood_level_indicator(current_water_level, threshold_siaga=150, threshold_bahaya=200)
     
     # Additional info
     if current_water_level < 150:
-        st.success("✅ **KONDISI AMAN**  \nKetinggian air dalam batas normal")
+        st.success(f"{render_icon('shield-check', size=16)} **KONDISI AMAN**  \nKetinggian air dalam batas normal")
     elif current_water_level < 200:
-        st.warning("⚠️ **SIAGA BANJIR**  \nWaspada! Ketinggian air meningkat")
+        st.warning(f"{render_icon('triangle-alert', size=16)} **SIAGA BANJIR**  \nWaspada! Ketinggian air meningkat")
     else:
-        st.error("🚨 **BAHAYA BANJIR**  \nEvakuasi! Ketinggian air sangat tinggi")
+        st.error(f"{render_icon('siren', size=16)} **BAHAYA BANJIR**  \nEvakuasi! Ketinggian air sangat tinggi")
     
-    st.markdown("#### 📊 Grafik Tren Ketinggian Air (24 Jam Terakhir)")
+    st.markdown(f"#### {render_icon('activity', size=20)} Grafik Tren Ketinggian Air (24 Jam Terakhir)", unsafe_allow_html=True)
     
     # Create chart data
     chart_data = {
@@ -223,7 +224,7 @@ else:
     col1, col2 = st.columns([2, 1])
     
     with col1:
-        st.markdown("#### 📊 Grafik Tren Ketinggian Air (24 Jam Terakhir)")
+        st.markdown(f"#### {render_icon('activity', size=20, color='#ffffff')} Grafik Tren Ketinggian Air (24 Jam Terakhir)", unsafe_allow_html=True)
         
         # Create chart data
         chart_data = {
@@ -235,7 +236,7 @@ else:
         st.plotly_chart(fig, use_container_width=True)
     
     with col2:
-        st.markdown("#### 🌊 Status Banjir")
+        st.markdown(f"#### {render_icon('waves', size=20, color='#ffffff')} Status Banjir", unsafe_allow_html=True)
         flood_level_indicator(current_water_level, threshold_siaga=150, threshold_bahaya=200)
     
         # Additional info
@@ -249,7 +250,7 @@ else:
 st.markdown("---")
 
 # ==================== RECENT ALERTS ====================
-st.markdown("### 🚨 Notifikasi Terbaru")
+st.markdown(f"### {render_icon('bell', size=24, color='#ffffff')} Notifikasi Terbaru", unsafe_allow_html=True)
 
 # Dummy alerts
 if current_water_level > 150:
@@ -275,7 +276,7 @@ st.success("""
 st.markdown("---")
 
 # ==================== QUICK ACTIONS ====================
-st.markdown("### ⚡ Aksi Cepat")
+st.markdown(f"### {render_icon('zap', size=24, color='#ffffff')} Aksi Cepat", unsafe_allow_html=True)
 
 col1, col2, col3 = st.columns(3)
 

@@ -25,6 +25,7 @@ from components import (
     loading_spinner,
     sidebar_info,
     inject_responsive_css,
+    render_icon,
     COLORS
 )
 
@@ -56,7 +57,7 @@ with st.sidebar:
 page_header(
     "Prediksi Banjir (LSTM)",
     "Kalkulator Prediksi Ketinggian Air Berdasarkan Data Curah Hujan",
-    "🔮"
+    "cloud-hail"
 )
 
 # Check API connection
