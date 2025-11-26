@@ -1,0 +1,20 @@
+{
+    "name": "jakarta-floodnet-api",
+    "projectId": "86030f64-9595-4f69-bc42-e74cd278b98b",
+    "services": [
+        {
+            "name": "api-gateway",
+            "type": "server",
+            "buildCommand": "pip install -r requirements.txt",
+            "startCommand": "uvicorn services.api_gateway.src.main:app --host 0.0.0.0 --port $PORT",
+            "environment": {
+                "PORT": "8080"
+            },
+            "deploy": {
+                "procfile": "web: uvicorn services.api_gateway.src.main:app --host 0.0.0.0 --port $PORT",
+                "healthcheckPath": "/health",
+                "buildType": "dockerfile"
+            }
+        }
+    ]
+}
