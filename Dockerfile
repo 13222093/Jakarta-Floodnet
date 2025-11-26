@@ -8,9 +8,9 @@ ENV PYTHONUNBUFFERED=1
 # Set work directory
 WORKDIR /app
 
-# Install system dependencies (Required for OpenCV)
-RUN apt-get update && apt-get install -y \
-    libgl1-mesa-glx \
+## Perhatikan: libgl1-mesa-glx diganti libgl1 (yang lebih dasar)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libgl1 \
     libglib2.0-0 \
     && rm -rf /var/lib/apt/lists/*
 
