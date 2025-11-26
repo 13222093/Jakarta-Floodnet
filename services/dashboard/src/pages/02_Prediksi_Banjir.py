@@ -99,67 +99,115 @@ st.markdown("---")
 # ==================== INPUT FORM ====================
 st.markdown("### 📝 Input Data Curah Hujan")
 
-# Responsive form layout
-col1, col2 = st.columns([1, 1])
+# Add Mode Selection
+input_mode = st.radio(
+    "Pilih Mode Input:",
+    ["Manual", "Skenario Demo"],
+    horizontal=True
+)
 
-with col1:
-    st.markdown("#### 🌧️ Curah Hujan Bogor")
-    hujan_bogor = st.number_input(
-        "Curah Hujan (mm)",
-        min_value=0.0,
-        max_value=500.0,
-        value=15.0,
-        step=0.5,
-        help="Masukkan curah hujan di Bogor dalam mm",
-        key="hujan_bogor"
-    )
-    
-    st.caption(f"📊 Nilai: **{hujan_bogor:.1f} mm**")
-    
-    # Visual indicator
-    if hujan_bogor < 20:
-        st.success("✅ Ringan - Curah hujan rendah")
-    elif hujan_bogor < 50:
-        st.warning("⚠️ Sedang - Curah hujan moderat")
-    elif hujan_bogor < 100:
-        st.warning("⚠️ Lebat - Curah hujan tinggi")
+selected_scenario_id = None
+hujan_bogor = 0.0
+hujan_jakarta = 0.0
+current_water = 0.0
+
+if input_mode == "Skenario Demo":
+    # Fetch scenarios
+    scenarios_result = api_client.get_scenarios()
+    if scenarios_result['success']:
+        scenarios = scenarios_result['data']
+        # Create a mapping for the selectbox
+        scenario_options = {f"{s['name']} - {s['description']}": s['id'] for s in scenarios}
+        
+        selected_option = st.selectbox(
+            "Pilih Skenario Demo:",
+            options=list(scenario_options.keys())
+        )
+        selected_scenario_id = scenario_options[selected_option]
+        
+        # Show scenario details
+        scenario_data = next((s for s in scenarios if s['id'] == selected_scenario_id), None)
+        if scenario_data:
+            data = scenario_data.get('data', {})
+            hujan_jakarta = data.get('rainfall_jakarta', 0.0)
+            hujan_bogor = data.get('rainfall_bogor', 0.0)
+            current_water = data.get('tma_manggarai', 0.0)
+            
+            st.info(f"""
+                **Detail Skenario:**
+                - 🌧️ Hujan Jakarta: {hujan_jakarta} mm
+                - 🌧️ Hujan Bogor: {hujan_bogor} mm
+                - 🌊 TMA Manggarai: {current_water} cm
+            """)
+            
+            # Set values for chart visualization (optional)
+            # Variables already set above
+            
     else:
-        st.error("🚨 Sangat Lebat - Risiko banjir tinggi!")
+        st.error("Gagal mengambil data skenario")
 
-with col2:
-    st.markdown("#### 🌧️ Curah Hujan Jakarta")
-    hujan_jakarta = st.number_input(
-        "Curah Hujan (mm)",
-        min_value=0.0,
-        max_value=500.0,
-        value=20.0,
-        step=0.5,
-        help="Masukkan curah hujan di Jakarta dalam mm",
-        key="hujan_jakarta"
-    )
+else: # Manual Mode
+    # Responsive form layout
+    col1, col2 = st.columns([1, 1])
     
-    st.caption(f"📊 Nilai: **{hujan_jakarta:.1f} mm**")
+    with col1:
+        st.markdown("#### 🌧️ Curah Hujan Bogor")
+        hujan_bogor = st.number_input(
+            "Curah Hujan (mm)",
+            min_value=0.0,
+            max_value=500.0,
+            value=15.0,
+            step=0.5,
+            help="Masukkan curah hujan di Bogor dalam mm",
+            key="hujan_bogor"
+        )
+        
+        st.caption(f"📊 Nilai: **{hujan_bogor:.1f} mm**")
+        
+        # Visual indicator
+        if hujan_bogor < 20:
+            st.success("✅ Ringan - Curah hujan rendah")
+        elif hujan_bogor < 50:
+            st.warning("⚠️ Sedang - Curah hujan moderat")
+        elif hujan_bogor < 100:
+            st.warning("⚠️ Lebat - Curah hujan tinggi")
+        else:
+            st.error("🚨 Sangat Lebat - Risiko banjir tinggi!")
     
-    # Visual indicator
-    if hujan_jakarta < 20:
-        st.success("✅ Ringan - Curah hujan rendah")
-    elif hujan_jakarta < 50:
-        st.warning("⚠️ Sedang - Curah hujan moderat")
-    elif hujan_jakarta < 100:
-        st.warning("⚠️ Lebat - Curah hujan tinggi")
-    else:
-        st.error("🚨 Sangat Lebat - Risiko banjir tinggi!")
-
-# Optional: Current water level
-with st.expander("⚙️ Parameter Lanjutan (Opsional)"):
-    current_water = st.number_input(
-        "Ketinggian Air Saat Ini (cm)",
-        min_value=0.0,
-        max_value=500.0,
-        value=100.0,
-        step=1.0,
-        help="Opsional: Ketinggian air saat ini di TMA Manggarai"
-    )
+    with col2:
+        st.markdown("#### 🌧️ Curah Hujan Jakarta")
+        hujan_jakarta = st.number_input(
+            "Curah Hujan (mm)",
+            min_value=0.0,
+            max_value=500.0,
+            value=20.0,
+            step=0.5,
+            help="Masukkan curah hujan di Jakarta dalam mm",
+            key="hujan_jakarta"
+        )
+        
+        st.caption(f"📊 Nilai: **{hujan_jakarta:.1f} mm**")
+        
+        # Visual indicator
+        if hujan_jakarta < 20:
+            st.success("✅ Ringan - Curah hujan rendah")
+        elif hujan_jakarta < 50:
+            st.warning("⚠️ Sedang - Curah hujan moderat")
+        elif hujan_jakarta < 100:
+            st.warning("⚠️ Lebat - Curah hujan tinggi")
+        else:
+            st.error("🚨 Sangat Lebat - Risiko banjir tinggi!")
+    
+    # Optional: Current water level
+    with st.expander("⚙️ Parameter Lanjutan (Opsional)"):
+        current_water = st.number_input(
+            "Ketinggian Air Saat Ini (cm)",
+            min_value=0.0,
+            max_value=500.0,
+            value=100.0,
+            step=1.0,
+            help="Opsional: Ketinggian air saat ini di TMA Manggarai"
+        )
 
 st.markdown("---")
 
@@ -184,18 +232,21 @@ with col2:
 # ==================== PREDICTION RESULTS ====================
 if predict_button:
     with loading_spinner("🔮 Menghitung prediksi..."):
-        # Prepare data
-        prediction_data = {
-            'hujan_bogor': hujan_bogor,
-            'hujan_jakarta': hujan_jakarta
-        }
-        
-        # Add optional parameter if provided
-        if current_water > 0:
-            prediction_data['current_water_level'] = current_water
-        
-        # Call API
-        result = api_client.get_prediction(prediction_data)
+        if input_mode == "Skenario Demo" and selected_scenario_id:
+             result = api_client.predict_scenario(selected_scenario_id)
+        else:
+            # Prepare data
+            prediction_data = {
+                'hujan_bogor': hujan_bogor,
+                'hujan_jakarta': hujan_jakarta
+            }
+            
+            # Add optional parameter if provided
+            if current_water > 0:
+                prediction_data['current_water_level'] = current_water
+            
+            # Call API
+            result = api_client.get_prediction(prediction_data)
     
     st.markdown("---")
     st.markdown("### 🎯 Hasil Prediksi")
@@ -311,14 +362,6 @@ if predict_button:
         # Detailed info
         with st.expander("📊 Detail Lengkap Prediksi"):
             st.json(data)
-            
-            # Debug info
-            st.markdown("**🔧 Debug Info:**")
-            st.write(f"- Prediction value: `{prediction_value}` (from field: `prediction_cm`)")
-            st.write(f"- Risk level: `{risk_level}` (from field: `risk_level`)")
-            st.write(f"- Status: `{status}` (from field: `status`)")
-            st.write(f"- Alert message: `{alert_message}` (from field: `alert_message`)")
-            st.write(f"- Calculated confidence: `{confidence:.1%}`")
         
         # Action buttons
         st.markdown("---")

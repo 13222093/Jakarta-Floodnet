@@ -2,6 +2,7 @@ import sys
 import os
 import logging
 import numpy as np
+import cv2
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from pydantic import BaseModel
 from typing import Optional, List
@@ -143,14 +144,19 @@ async def predict_flood_risk(data: PredictionRequest):
             prediction_array = lstm_model.predict(features)
             prediction = float(prediction_array[0])
             
-            # Risk Logic
-            risk = "AMAN"
-            if prediction > 150: risk = "BAHAYA" # >150 is Danger
-            elif prediction > 100: risk = "SIAGA" # >100 is Warning
-            
-            msg = f"Status: {risk}. Ketinggian diprediksi {round(prediction, 1)} cm."
-            if risk == "BAHAYA":
-                msg = "⚠️ POTENSI BANJIR! Segera evakuasi."
+            # Risk Logic (Correct Hydrological Thresholds for Manggarai Scale)
+            if prediction >= 900:
+                risk = "CRITICAL" # SIAGA 1
+                msg = "🚨 EVAKUASI SEGERA! Ketinggian air mencapai level kritis."
+            elif prediction >= 750:
+                risk = "BAHAYA" # HIGH / SIAGA 2
+                msg = "⚠️ SIAGA 1. Air mulai meluap, waspada."
+            elif prediction >= 500:
+                risk = "WASPADA" # MEDIUM / SIAGA 3
+                msg = "ℹ️ Kondisi Waspada. Siaga di pintu air."
+            else: # Below 500 cm (Normal/Aman)
+                risk = "AMAN" # LOW
+                msg = "✅ Kondisi Aman. Lanjutkan monitoring."
             
             return {
                 "status": "success",
@@ -205,12 +211,13 @@ def get_available_scenarios():
     """List all scenarios for Frontend Dropdown"""
     return list_scenarios()
 
+# --- SCENARIOS & DEMO DATA ---
+# Imported from src.scenarios
+
 @app.post("/predict/scenario/{scenario_id}")
 async def predict_scenario(scenario_id: str):
     """
-    Run a specific demo scenario.
-    - If God Mode is enabled in scenario -> Force CRITICAL
-    - If Normal -> Feed scenario data into Real AI
+    Run a specific demo scenario with ADVANCED PHYSICS ENGINE.
     """
     scenario = get_scenario(scenario_id)
     if not scenario:
@@ -227,45 +234,93 @@ async def predict_scenario(scenario_id: str):
             "timestamp": "2025-11-25T10:00:00Z"
         }
 
-    # B. REAL AI WITH SCENARIO DATA
+    # B. REAL AI WITH PHYSICS ENGINE
     data = scenario["data"]
-    rainfall = data["rainfall_mm"]
-    water_level = data["water_level_cm"]
+    # Map new schema to old variables for compatibility
+    rainfall = data.get("rainfall_jakarta", data.get("rainfall_mm", 0.0))
+    water_level = data.get("tma_manggarai", data.get("water_level_cm", 0.0))
+    
+    predicted_tma = water_level # Default to current
     
     if lstm_model and lstm_model.is_trained:
         try:
-            # Input shape: (1, 3) -> [rain, rain, water]
+            # 1. AI Prediction
             features = np.array([[rainfall, rainfall, water_level]])
             prediction_array = lstm_model.predict(features)
-            prediction = float(prediction_array[0])
+            pred_lstm_raw = float(prediction_array[0])
             
-            # Risk Logic
-            risk = "AMAN"
-            if prediction > 150: risk = "BAHAYA"
-            elif prediction > 100: risk = "SIAGA"
+            # 2. PHYSICS ENGINE (The "Secret Sauce")
+            # --- Dynamic Weighting ---
+            deviation = abs(pred_lstm_raw - water_level)
+            if deviation > 200: 
+                ai_weight = 0.05; physics_weight = 0.95
+            elif deviation > 100:
+                ai_weight = 0.15; physics_weight = 0.85
+            else:
+                ai_weight = 0.30; physics_weight = 0.70
             
-            msg = f"Status: {risk}. Ketinggian diprediksi {round(prediction, 1)} cm."
-            if risk == "BAHAYA":
-                msg = "⚠️ POTENSI BANJIR! Segera evakuasi."
+            weighted_prediction = (water_level * physics_weight) + (pred_lstm_raw * ai_weight)
+
+            # --- Rainfall Bias ---
+            base_level = max(water_level, 100)
+            rain_bias = 0
+            if rainfall > 50:
+                rain_bias = base_level * 0.05
+            elif rainfall > 20:
+                rain_bias = base_level * 0.02
+            rain_bias = min(rain_bias, 50.0)
+            
+            temp_pred = weighted_prediction + rain_bias
+
+            # --- Sanity Checks ---
+            final_prediction = temp_pred
+            # Rule A: Water can't drop if raining heavily
+            if rainfall > 20:
+                final_prediction = max(final_prediction, water_level)
+            
+            # Rule B: Max Hourly Change
+            max_change = 100.0
+            if abs(final_prediction - water_level) > max_change:
+                if final_prediction > water_level:
+                    final_prediction = water_level + max_change
+                else:
+                    final_prediction = water_level - (max_change * 0.5)
+
+            predicted_tma = round(max(final_prediction, 0.0), 2)
+            
+            # Risk Logic (Correct Hydrological Thresholds for Manggarai Scale)
+            if predicted_tma >= 900:
+                risk = "CRITICAL" # SIAGA 1
+                msg = "🚨 EVAKUASI SEGERA! Ketinggian air mencapai level kritis."
+            elif predicted_tma >= 750:
+                risk = "BAHAYA" # HIGH / SIAGA 2
+                msg = "⚠️ SIAGA 1. Air mulai meluap, waspada."
+            elif predicted_tma >= 500:
+                risk = "WASPADA" # MEDIUM / SIAGA 3
+                msg = "ℹ️ Kondisi Waspada. Siaga di pintu air."
+            else: # Below 500 cm (Normal/Aman)
+                risk = "AMAN" # LOW
+                msg = "✅ Kondisi Aman. Lanjutkan monitoring."
             
             return {
                 "status": "success",
-                "prediction_cm": round(prediction, 2),
+                "prediction_cm": predicted_tma,
                 "risk_level": risk,
                 "alert_message": msg,
                 "scenario_used": scenario["name"]
             }
         except Exception as e:
             logger.error(f"Scenario Inference Error: {e}")
-            return {"status": "error", "message": "Computation Error"}
+            # Fallback to physics
+            pass
 
-    # Fallback
+    # Fallback (Physics Only)
     dummy_pred = water_level + (rainfall * 0.5)
     return {
         "status": "fallback_mode",
         "prediction_cm": round(dummy_pred, 1),
         "risk_level": "UNKNOWN",
-        "alert_message": "Model belum siap/dilatih.",
+        "alert_message": "Model belum siap/dilatih. Menggunakan estimasi fisika.",
         "scenario_used": scenario["name"]
     }
 

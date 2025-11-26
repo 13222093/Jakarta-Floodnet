@@ -299,6 +299,51 @@ class APIClient:
                 }
             }
 
+    def get_scenarios(self) -> Dict[str, Any]:
+        """
+        Mendapatkan daftar skenario demo
+        """
+        try:
+            response = requests.get(
+                f"{self.base_url}/scenarios",
+                timeout=self.timeout
+            )
+            response.raise_for_status()
+            return {
+                'success': True,
+                'data': response.json(),
+                'message': 'Skenario berhasil didapatkan'
+            }
+        except Exception as e:
+            logger.error(f"Error in get_scenarios: {str(e)}")
+            return {
+                'success': False,
+                'message': f'Error: {str(e)}',
+                'data': []
+            }
+
+    def predict_scenario(self, scenario_id: str) -> Dict[str, Any]:
+        """
+        Menjalankan prediksi berdasarkan skenario
+        """
+        try:
+            response = requests.post(
+                f"{self.base_url}/predict/scenario/{scenario_id}",
+                timeout=self.timeout
+            )
+            response.raise_for_status()
+            return {
+                'success': True,
+                'data': response.json(),
+                'message': 'Prediksi skenario berhasil'
+            }
+        except Exception as e:
+            logger.error(f"Error in predict_scenario: {str(e)}")
+            return {
+                'success': False,
+                'message': f'Error: {str(e)}'
+            }
+
 
 # Singleton instance untuk digunakan di seluruh aplikasi
 api_client = APIClient()

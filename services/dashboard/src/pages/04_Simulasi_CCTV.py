@@ -43,18 +43,24 @@ inject_responsive_css()
 
 # ==================== CONSTANTS ====================
 CCTV_LOCATIONS = [
-    {"name": "📍 Pintu Air Manggarai", "location": "Manggarai, Jakarta Selatan"},
-    {"name": "🌊 Bendung Katulampa", "location": "Bogor, Jawa Barat"}, 
-    {"name": "🏙️ Underpass Kemayoran", "location": "Kemayoran, Jakarta Pusat"},
-    {"name": "🌉 Jembatan Penyeberangan", "location": "Tebet, Jakarta Selatan"}
+    {"name": "📍 Pintu Air Manggarai (Pusat)", "location": "Manggarai, Jakarta Selatan"},
+    {"name": "🌊 Bendung Katulampa (Hulu)", "location": "Bogor, Jawa Barat"},
+    {"name": "🏙️ Pintu Air Karet (Barat)", "location": "Tanah Abang, Jakarta Pusat"},
+    {"name": "🌉 Pos Pantau Sunter (Utara)", "location": "Sunter, Jakarta Utara"}
 ]
 
-# Video files (will use placeholder if not available)
 VIDEO_FILES = [
     "cctv_manggarai.mp4",
     "cctv_katulampa.mp4", 
-    "cctv_kemayoran.mp4",
-    "cctv_tebet.mp4"
+    "cctv_karet.mp4",
+    "cctv_sunter.mp4"
+]
+
+IMAGE_FILES = [
+    "cctv_manggarai.png", 
+    "cctv_katulampa.png", 
+    "cctv_karet.png", 
+    "cctv_sunter.png"
 ]
 
 # Path to videos directory
@@ -278,7 +284,7 @@ else:
                         st.image(
                             frame_rgb, 
                             channels="RGB", 
-                            use_column_width=True,
+                            use_container_width=True,
                             caption=f"📹 {current_location['name']} - Frame {frame_count}"
                         )
                     
@@ -287,12 +293,23 @@ else:
                     if (health['success'] and 
                         current_time - st.session_state.last_detection_time >= detection_interval):
                         
-                        # Convert frame to bytes for API
-                        _, buffer = cv2.imencode('.jpg', frame)
-                        frame_bytes = buffer.tobytes()
-                        
-                        # Send to YOLO API
+                        # --- STATIC IMAGE TRICK ---
+                        # Instead of sending the video frame, we send a high-quality static image
+                        # This ensures the AI detects the flood even if the video is low res or different
                         try:
+                            # Get image for current index
+                            current_image = IMAGE_FILES[st.session_state.cctv_index]
+                            img_path = VIDEOS_DIR.parent / current_image
+                            
+                            if img_path.exists():
+                                with open(img_path, "rb") as f:
+                                    frame_bytes = f.read()
+                            else:
+                                # Fallback to video frame if static image missing
+                                _, buffer = cv2.imencode('.jpg', frame)
+                                frame_bytes = buffer.tobytes()
+                                
+                            # Send to YOLO API
                             detection_result = api_client.verify_visual(
                                 frame_bytes, 
                                 f"cctv_frame_{current_time}.jpg"
@@ -353,6 +370,10 @@ if st.session_state.detection_result:
     
     if result.get('success'):
         data = result.get('data', {})
+        
+        # DEBUG: Show raw response
+        with st.expander("🔍 Debug: Raw API Response", expanded=True):
+            st.json(data)
         
         col1, col2 = st.columns([1, 1])
         

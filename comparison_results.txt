@@ -1,0 +1,13 @@
+🚀 Starting Model Comparison...
+✅ Scalers loaded successfully
+ℹ️ Scaler expects 3 features
+🔎 Found 4 models: ['models\\best_model_modular.h5', 'models\\lstm_flood_forecaster.h5', 'models\\lstm_flood_forecaster_fixed.h5', 'models\\lstm_model.h5']
+
+================================================================================
+Filename                            | Prediction (cm) | Status
+================================================================================
+best_model_modular.h5               | ERROR           | ❌ Feature mismatch (Model: 53, Scaler: 3)
+lstm_flood_forecaster.h5            | 350.88          | ⚠️ FAIL (Lazy/Mean Reversion)
+lstm_flood_forecaster_fixed.h5      | ERROR           | ❌ Feature mismatch (Model: 43, Scaler: 3)
+lstm_model.h5                       | 417.43          | ⚠️ FAIL (Lazy/Mean Reversion)
+================================================================================
