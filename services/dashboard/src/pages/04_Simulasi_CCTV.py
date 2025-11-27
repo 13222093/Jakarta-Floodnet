@@ -114,7 +114,6 @@ with st.sidebar:
             data = result.get('data', {})
             
             # Fix: Parse backend response correctly
-            # Backend returns different fields than expected
             flood_detected = (
                 data.get('is_flooded', False) or 
                 data.get('flood_detected', False)
@@ -124,9 +123,9 @@ with st.sidebar:
             confidence = data.get('flood_probability', data.get('confidence', 0))
             
             if flood_detected:
-                st.error(f"🚨 **BANJIR TERDETEKSI**\n\nTingkat Keyakinan: {confidence:.1%}")
+                st.error(f"🚨 **BANJIR TERDETEKSI**\n\nTingkat Keyakinan adanya Banjir: {confidence:.1%}")
             else:
-                st.success(f"✅ **KONDISI NORMAL**\n\nTingkat Keyakinan: {confidence:.1%}")
+                st.success(f"✅ **KONDISI NORMAL**\n\nTingkat Keyakinan adanya Banjir: {confidence:.1%}")
         else:
             st.warning("⚠️ Gagal deteksi")
     else:
@@ -153,7 +152,6 @@ col1, col2, col3 = st.columns([1, 2, 1])
 with col1:
     if st.button("⬅️ **Channel Sebelumnya**", use_container_width=True):
         st.session_state.cctv_index = (st.session_state.cctv_index - 1) % len(CCTV_LOCATIONS)
-        # Fix: Let Streamlit handle the refresh naturally without forced rerun
 
 with col2:
     current_location = CCTV_LOCATIONS[st.session_state.cctv_index]
@@ -177,7 +175,6 @@ with col2:
 with col3:
     if st.button("➡️ **Channel Berikutnya**", use_container_width=True):
         st.session_state.cctv_index = (st.session_state.cctv_index + 1) % len(CCTV_LOCATIONS)
-        # Fix: Let Streamlit handle the refresh naturally without forced rerun
 
 st.markdown("---")
 
@@ -233,69 +230,19 @@ else:
     # Video player logic
     if st.session_state.is_playing:
         try:
-            # Open video capture
-            cap = cv2.VideoCapture(str(video_path))
+            # Display video using native Streamlit player (Much smoother)
+            with video_placeholder.container():
+                st.video(str(video_path), autoplay=True, loop=True, muted=True)
             
-            if not cap.isOpened():
-                error_message("Gagal membuka file video", f"Path: {video_path}")
-            else:
-                # Get video properties
-                fps = int(cap.get(cv2.CAP_PROP_FPS))
-                total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+            # One-Shot Detection Logic
+            current_time = time.time()
+            if (health['success'] and 
+                (st.session_state.detection_result is None or 
+                 st.session_state.last_detection_time == 0 or
+                 current_time - st.session_state.last_detection_time > 2.0)): # Debounce
                 
                 with status_placeholder.container():
-                    col1, col2, col3, col4 = st.columns(4)
-                    with col1:
-                        st.metric("🎬 FPS", f"{fps}")
-                    with col2:
-                        st.metric("📊 Total Frames", f"{total_frames}")
-                    with col3:
-                        st.metric("⏰ Durasi", f"{total_frames/fps:.1f}s")
-                    with col4:
-                        if st.session_state.detection_result:
-                            result = st.session_state.detection_result
-                            if result.get('success'):
-                                data = result.get('data', {})
-                                # Fix: Use correct field names from backend
-                                flood_status = "🚨 BANJIR" if (
-                                    data.get('is_flooded', False) or 
-                                    data.get('flood_detected', False)
-                                ) else "✅ NORMAL"
-                                st.metric("🔍 Status", flood_status)
-                
-                # Frame reading loop
-                frame_count = 0
-                while cap.isOpened() and st.session_state.is_playing:
-                    ret, frame = cap.read()
-                    
-                    if not ret:
-                        if auto_loop:
-                            # Reset to beginning for loop
-                            cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
-                            continue
-                        else:
-                            break
-                    
-                    # Convert BGR to RGB
-                    frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                    
-                    # Display frame
-                    with video_placeholder.container():
-                        st.image(
-                            frame_rgb, 
-                            channels="RGB", 
-                            use_container_width=True,
-                            caption=f"📹 {current_location['name']} - Frame {frame_count}"
-                        )
-                    
-                    # Check if it's time for detection
-                    current_time = time.time()
-                    if (health['success'] and 
-                        current_time - st.session_state.last_detection_time >= detection_interval):
-                        
-                        # --- STATIC IMAGE TRICK ---
-                        # Instead of sending the video frame, we send a high-quality static image
-                        # This ensures the AI detects the flood even if the video is low res or different
+                    with st.spinner("🔍 Menganalisis kondisi visual..."):
                         try:
                             # Get image for current index
                             current_image = IMAGE_FILES[st.session_state.cctv_index]
@@ -304,35 +251,38 @@ else:
                             if img_path.exists():
                                 with open(img_path, "rb") as f:
                                     frame_bytes = f.read()
-                            else:
-                                # Fallback to video frame if static image missing
-                                _, buffer = cv2.imencode('.jpg', frame)
-                                frame_bytes = buffer.tobytes()
                                 
-                            # Send to YOLO API
-                            detection_result = api_client.verify_visual(
-                                frame_bytes, 
-                                f"cctv_frame_{current_time}.jpg"
-                            )
-                            st.session_state.detection_result = detection_result
-                            st.session_state.last_detection_time = current_time
-                            
-                            # Fix: Don't force full page reload - just update session state
-                            # The UI will automatically reflect the changes on next render
-                            
+                                # Send to YOLO API
+                                detection_result = api_client.verify_visual(
+                                    frame_bytes, 
+                                    f"cctv_analysis_{current_time}.jpg"
+                                )
+                                st.session_state.detection_result = detection_result
+                                st.session_state.last_detection_time = current_time
+                                st.rerun()
+                            else:
+                                st.warning(f"Image asset missing: {current_image}")
+                                
                         except Exception as e:
-                            st.session_state.detection_result = {
-                                'success': False,
-                                'message': f'Error: {str(e)}'
-                            }
+                            st.error(f"Detection Error: {str(e)}")
+            
+            # Display Status Metrics
+            if st.session_state.detection_result:
+                result = st.session_state.detection_result
+                if result.get('success'):
+                    data = result.get('data', {})
+                    flood_status = "🚨 BANJIR" if (
+                        data.get('is_flooded', False) or 
+                        data.get('flood_detected', False)
+                    ) else "✅ NORMAL"
                     
-                    frame_count += 1
-                    
-                    # Control frame rate
-                    time.sleep(1.0 / fps)
-                
-                cap.release()
-        
+                    with status_placeholder.container():
+                        col1, col2 = st.columns(2)
+                        with col1:
+                            st.metric("📍 Lokasi", current_location['name'])
+                        with col2:
+                            st.metric("🔍 Status AI", flood_status)
+
         except Exception as e:
             error_message("Error dalam pemrosesan video", str(e))
     
@@ -393,10 +343,10 @@ if st.session_state.detection_result:
             
             if flood_detected:
                 st.error(f"🚨 **Status**: BANJIR TERDETEKSI")
-                st.error(f"📊 **Confidence**: {confidence:.1%}")
+                st.error(f"📊 **Confidence of flood**: {confidence:.1%}")
             else:
                 st.success(f"✅ **Status**: KONDISI NORMAL")
-                st.success(f"📊 **Confidence**: {confidence:.1%}")
+                st.success(f"📊 **Confidence of flood**: {confidence:.1%}")
         
         with col2:
             st.markdown("#### 🔧 Detail Teknis")

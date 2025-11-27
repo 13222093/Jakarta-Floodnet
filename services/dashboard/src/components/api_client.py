@@ -99,7 +99,9 @@ class APIClient:
             
             # Backend expected payload format
             payload = {
-                'rainfall_mm': rainfall_mm,
+                'rainfall_mm': rainfall_mm, # Legacy support (Jakarta)
+                'rainfall_jakarta': rainfall_mm,
+                'rainfall_bogor': float(data['hujan_bogor']),
                 'water_level_cm': water_level_cm
             }
             

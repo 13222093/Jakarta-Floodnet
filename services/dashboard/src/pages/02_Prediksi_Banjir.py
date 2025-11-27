@@ -297,12 +297,18 @@ if predict_button:
             if risk_level == "AMAN":
                 risk_color = COLORS['safe']
                 risk_icon = "✅"
-            elif risk_level == "SIAGA":
+            elif risk_level == "WASPADA":
                 risk_color = COLORS['warning']
                 risk_icon = "⚠️"
-            else:  # BAHAYA
+            elif risk_level == "BAHAYA":
                 risk_color = COLORS['danger']
                 risk_icon = "🚨"
+            elif risk_level == "CRITICAL":
+                risk_color = COLORS['danger']
+                risk_icon = "🆘"
+            else:
+                risk_color = COLORS['info']
+                risk_icon = "❓"
             
             st.markdown(f"""
                 <div style="
@@ -354,10 +360,14 @@ if predict_button:
         
         if risk_level == "AMAN":
             success_message(f"**KONDISI AMAN**: {alert_message}")
-        elif risk_level == "SIAGA":
-            warning_message(f"**SIAGA BANJIR**: {alert_message}")
+        elif risk_level == "WASPADA":
+            warning_message(f"**STATUS WASPADA (SIAGA 3)**: {alert_message}")
+        elif risk_level == "BAHAYA":
+            st.error(f"⚠️ **STATUS BAHAYA (SIAGA 2)**: {alert_message}")
+        elif risk_level == "CRITICAL":
+            st.error(f"🚨 **STATUS CRITICAL (SIAGA 1)**: {alert_message}")
         else:
-            st.error(f"🚨 **BAHAYA BANJIR**: {alert_message}")
+            st.info(f"Status: {risk_level} - {alert_message}")
         
         # Detailed info
         with st.expander("📊 Detail Lengkap Prediksi"):

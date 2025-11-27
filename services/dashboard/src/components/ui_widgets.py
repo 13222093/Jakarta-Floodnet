@@ -153,11 +153,11 @@ def error_message(message: str, details: Optional[str] = None):
         message: Pesan error utama
         details: Detail tambahan (optional)
     """
-    error_icon = render_icon('x-circle', size=20, color="#ffffff")
+    error_icon = "❌"
     st.markdown(f"""
         <div style="background: {COLORS['error']}15; border-left: 4px solid {COLORS['error']}; padding: 1rem; border-radius: 4px; margin: 1rem 0;">
             <div style="display: flex; align-items: center; gap: 0.5rem; color: {COLORS['error']};">
-                {error_icon} <strong>{message}</strong>
+                <div style="font-size: 1.25rem;">{error_icon}</div> <strong>{message}</strong>
             </div>
         </div>
     """, unsafe_allow_html=True)
@@ -168,11 +168,11 @@ def error_message(message: str, details: Optional[str] = None):
 
 def success_message(message: str):
     """Menampilkan pesan sukses"""
-    success_icon = render_icon('shield-check', size=20, color="#ffffff")
+    success_icon = "✅"
     st.markdown(f"""
         <div style="background: {COLORS['success']}15; border-left: 4px solid {COLORS['success']}; padding: 1rem; border-radius: 4px; margin: 1rem 0;">
             <div style="display: flex; align-items: center; gap: 0.5rem; color: {COLORS['success']};">
-                {success_icon} <strong>{message}</strong>
+                <div style="font-size: 1.25rem;">{success_icon}</div> <strong>{message}</strong>
             </div>
         </div>
     """, unsafe_allow_html=True)
@@ -180,11 +180,11 @@ def success_message(message: str):
 
 def warning_message(message: str):
     """Menampilkan pesan warning"""
-    warning_icon = render_icon('triangle-alert', size=20, color="#ffffff")
+    warning_icon = "⚠️"
     st.markdown(f"""
         <div style="background: {COLORS['warning']}15; border-left: 4px solid {COLORS['warning']}; padding: 1rem; border-radius: 4px; margin: 1rem 0;">
             <div style="display: flex; align-items: center; gap: 0.5rem; color: {COLORS['warning']};">
-                {warning_icon} <strong>{message}</strong>
+                <div style="font-size: 1.25rem;">{warning_icon}</div> <strong>{message}</strong>
             </div>
         </div>
     """, unsafe_allow_html=True)
@@ -192,11 +192,11 @@ def warning_message(message: str):
 
 def info_message(message: str):
     """Menampilkan pesan info"""
-    info_icon = render_icon('info', size=20, color="#ffffff")
+    info_icon = "ℹ️"
     st.markdown(f"""
         <div style="background: {COLORS['info']}15; border-left: 4px solid {COLORS['info']}; padding: 1rem; border-radius: 4px; margin: 1rem 0;">
             <div style="display: flex; align-items: center; gap: 0.5rem; color: {COLORS['info']};">
-                {info_icon} <strong>{message}</strong>
+                <div style="font-size: 1.25rem;">{info_icon}</div> <strong>{message}</strong>
             </div>
         </div>
     """, unsafe_allow_html=True)
@@ -241,29 +241,30 @@ def connection_status_badge(is_connected: bool):
         """, unsafe_allow_html=True)
 
 
-def flood_level_indicator(water_level: float, threshold_siaga: float = 150.0,
-                          threshold_bahaya: float = 200.0):
+def flood_level_indicator(water_level: float, threshold_siaga: float = 400.0,
+                          threshold_bahaya: float = 700.0):
     """
     Indikator visual level banjir
     
     Args:
         water_level: Ketinggian air dalam cm
-        threshold_siaga: Batas siaga (default 150cm)
-        threshold_bahaya: Batas bahaya (default 200cm)
+        threshold_siaga: Batas siaga (default 400cm - WASPADA)
+        threshold_bahaya: Batas bahaya (default 700cm - BAHAYA)
     """
+    # Tentukan status
     # Tentukan status
     if water_level < threshold_siaga:
         status = 'safe'
         status_text = 'AMAN'
-        icon_html = render_icon('shield-check', size=48, color=COLORS['safe'])
+        icon_html = "✅"
     elif water_level < threshold_bahaya:
         status = 'warning'
-        status_text = 'SIAGA'
-        icon_html = render_icon('triangle-alert', size=48, color=COLORS['warning'])
+        status_text = 'WASPADA'
+        icon_html = "⚠️"
     else:
         status = 'danger'
         status_text = 'BAHAYA'
-        icon_html = render_icon('siren', size=48, color=COLORS['danger'])
+        icon_html = "🚨"
     
     color = COLORS[status]
     
@@ -327,10 +328,10 @@ def create_water_level_chart(data: Dict[str, Any]):
     ))
     
     # Threshold lines
-    fig.add_hline(y=150, line_dash="dash", line_color=COLORS['warning'],
-                  annotation_text="Siaga (150 cm)")
-    fig.add_hline(y=200, line_dash="dash", line_color=COLORS['danger'],
-                  annotation_text="Bahaya (200 cm)")
+    fig.add_hline(y=400, line_dash="dash", line_color=COLORS['warning'],
+                  annotation_text="Waspada (400 cm)")
+    fig.add_hline(y=700, line_dash="dash", line_color=COLORS['danger'],
+                  annotation_text="Bahaya (700 cm)")
     
     fig.update_layout(
         title="Tren Ketinggian Air",
