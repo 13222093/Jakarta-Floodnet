@@ -1,146 +1,74 @@
-# 🌊 Jakarta FloodNet - Backend API
+# 🌊 Jakarta FloodNet - AI-Powered Flood Early Warning System
 
-Real-time flood early warning system for BPBD Jakarta.
+Jakarta FloodNet is a comprehensive early warning system designed to predict and detect flooding in Jakarta. It integrates real-time sensor data, AI-based prediction models, and computer vision for flood detection into a unified dashboard for decision-makers.
 
-## 🚀 Quick Start
+## 🚀 System Overview
+
+The system consists of three main components:
+
+1.  **API Gateway**: A robust FastAPI backend that orchestrates data flow, handles model inference requests, and manages system logic.
+2.  **AI Models**:
+    -   **LSTM (Long Short-Term Memory)**: Predicts flooding probability 24 hours in advance based on rainfall and water level data.
+    -   **YOLOv8**: Detects flooded areas and estimates flood extent from CCTV or satellite imagery.
+3.  **Dashboard**: An interactive Streamlit-based user interface for visualizing real-time data, predictions, and flood detection results.
+
+## ✨ Key Features
+
+-   **Real-time Monitoring**: Tracks rainfall (mm) and water levels (cm) from various monitoring points.
+-   **Flood Prediction**: Provides a 24-hour forecast with probability scores and risk levels (LOW, MEDIUM, HIGH).
+-   **Visual Flood Detection**: Automatically identifies flooded regions in images and calculates the affected area.
+-   **Actionable Insights**: Generates automated recommendations (e.g., "Initiate evacuation") based on risk levels.
+
+## 🛠️ Tech Stack
+
+-   **Backend**: Python, FastAPI, Uvicorn
+-   **Frontend**: Streamlit, Plotly
+-   **AI/ML**: TensorFlow (LSTM), Ultralytics YOLOv8, OpenCV
+-   **Data Processing**: Pandas, NumPy
+
+## 📦 Installation
 
 ### Prerequisites
-- Python 3.9+
-- pip
+-   Python 3.9+
+-   pip
 
-### Installation
+### Setup
+1.  Clone the repository:
+    ```bash
+    git clone <repository-url>
+    cd Jakarta-Floodnet
+    ```
+2.  Install dependencies:
+    ```bash
+    pip install -r requirements.txt
+    ```
+
+## 🚦 Usage
+
+### 1. Run the API Gateway
+Start the backend server to handle requests and model inference:
 ```bash
-pip install -r requirements.txt
+uvicorn services.api_gateway.src.main:app --reload
 ```
+-   **API URL**: `http://localhost:8000`
+-   **Swagger Docs**: `http://localhost:8000/docs`
 
-### Run API
+### 2. Run the Dashboard
+Launch the user interface to visualize data and interact with the system:
 ```bash
-uvicorn main:app --reload
+streamlit run services/dashboard/src/app.py
 ```
-API will be available at: `http://localhost:8000`
+-   **Dashboard URL**: `http://localhost:8501`
 
-### API Documentation
-- **Swagger UI:** http://localhost:8000/docs
-- **ReDoc:** http://localhost:8000/redoc
+## 📚 API Endpoints
 
-## 📚 Endpoints
+### Prediction & Detection
+-   `POST /predict`: Predict flooding probability based on sensor data.
+-   `POST /detect`: Detect flooded areas from images.
 
-### 1. GET /health
-Health check endpoint.
-**Response:**
-```json
-{
-  "status": "ok",
-  "message": "Jakarta FloodNet API is running",
-  "timestamp": "2025-11-21T22:00:00"
-}
-```
-### 2. POST /predict
-Predict flooding probability (24-hour forecast).
-**Input Data (SIMPLIFIED - MVP):**
-- `rainfall_mm`: Curah hujan dalam mm (dari BMKG/sensor)
-- `water_level_cm`: Ketinggian Muka Air dalam cm (dari TMA sensor)
-- `location_id`: ID lokasi monitoring (ex: MANGGARAI_01, KRUKUT_02)
-**Request:**
-```json
-{
-  "rainfall_mm": 15.5,
-  "water_level_cm": 150,
-  "location_id": "MANGGARAI_01"
-}
-```
-**Response:**
-```json
-{
-  "statusCode": 200,
-  "flooding_probability": 0.78,
-  "risk_level": "HIGH",
-  "confidence": 0.92,
-  "recommendation": "Initiate evacuation protocol",
-  "timestamp": "2025-11-21T22:00:00"
-}
-```
-**Risk Levels:**
-- `HIGH` (> 70%): Segera lakukan evakuasi
-- `MEDIUM` (40-70%): Siapkan protokol evakuasi
-- `LOW` (< 40%): Lanjutkan monitoring
-
-### 3. POST /detect
-Detect flooded areas from satellite/CCTV image.
-**Request:**
-```json
-{
-  "image_url": "https://example.com/cctv_manggarai.jpg",
-  "confidence_threshold": 0.5
-}
-```
-**Response:**
-```json
-{
-  "statusCode": 200,
-  "detections": [
-    {
-      "id": 1,
-      "bbox": [100, 150, 200, 250],
-      "confidence": 0.82,
-      "class": "flooded_area",
-      "area_m2": 245
-    }
-  ],
-  "total_flooded_area_m2": 245,
-  "detection_count": 1,
-  "timestamp": "2025-11-21T22:00:00"
-}
-```
-### 4. GET /metrics
-Get model performance metrics.
-**Response:**
-```json
-{
-  "statusCode": 200,
-  "models": {
-    "classification": {
-      "accuracy": 0.87,
-      "precision": 0.85,
-      "recall": 0.89,
-      "f1_score": 0.87
-    },
-    "detection": {
-      "precision": 0.82,
-      "recall": 0.78,
-      "map50": 0.80
-    }
-  },
-  "timestamp": "2025-11-21T22:00:00"
-}
-```
-
-## 🔄 Data Sources
-
-### Current MVP (Simple)
-- **Rainfall**: BMKG API atau sensor lokal
-- **Water Level (TMA)**: Sensor TMA Manggarai, Krukut, dll
-- **Location ID**: Predefined monitoring points
-
-### Future (Production)
-- Satellite imagery integration
-- Multiple sensor networks
-- Real-time data streaming
-
-## 🔗 Integration Notes
-- **LSTM Model (Classification):** Will be loaded in `/predict` endpoint (Hari 2-3)
-  - Input: rainfall + water level
-  - Output: flooding probability
-- **YOLOv8 Model (Detection):** Will be loaded in `/detect` endpoint (Hari 2-3)
-  - Input: satellite/CCTV image
-  - Output: detected flooded areas
-- **Dashboard:** Will consume these endpoints (STI team)
-
-## 📝 Development Timeline
-- **Hari 1:** API skeleton ✅ (DONE)
-- **Hari 2-3:** Model integration
-- **Hari 4:** Testing & optimization
-- **Hari 5:** Demo & presentation
+### System
+-   `GET /health`: Check system status.
+-   `GET /metrics`: View model performance metrics.
 
 ## 👥 Team
 | Role | Person | Responsibility |
@@ -150,14 +78,5 @@ Get model performance metrics.
 | Frontend | Tiffcu | Dashboard, visualization |
 | Strategy | Dejet | Pitch, BPBD relations |
 
-## 📋 Required Libraries
-See `requirements.txt` for complete list.
-Key dependencies:
-- FastAPI: Web framework
-- Uvicorn: ASGI server
-- Pydantic: Data validation
-- TensorFlow: LSTM model loading (Hari 2-3)
-- Ultralytics: YOLOv8 model loading (Hari 2-3)
-
 ---
-**Last Updated:** Nov 21, 2025
+**Last Updated:** Nov 29, 2025
